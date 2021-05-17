@@ -3,7 +3,7 @@
 #![allow(clippy::op_ref)]
 
 use crate::native_types::{Arithmetic, Witness};
-use noir_field::FieldElement;
+use noir_field::{FieldElement, FieldOp};
 
 use std::ops::{Add, Mul, Neg, Sub};
 
@@ -15,8 +15,8 @@ pub struct Linear {
 }
 
 impl Linear {
-    pub fn is_unit(&self) -> bool {
-        self.mul_scale.is_one() && self.add_scale.is_zero()
+    pub fn is_unit(&self, op: &dyn FieldOp) -> bool {
+        self.mul_scale.is_one(op) && self.add_scale.is_zero(op)
     }
     pub fn from_witness(witness: Witness) -> Linear {
         Linear {
@@ -29,52 +29,39 @@ impl Linear {
     pub const fn can_defer_constraint(&self) -> bool {
         true
     }
-}
 
-impl From<Witness> for Linear {
-    fn from(w: Witness) -> Linear {
-        Linear::from_witness(w)
-    }
-}
-impl From<FieldElement> for Linear {
-    fn from(element: FieldElement) -> Linear {
-        Linear {
-            add_scale: element,
-            witness: Witness::default(),
-            mul_scale: FieldElement::zero(),
-        }
-    }
-}
-
-impl Add<&Linear> for &Linear {
-    type Output = Arithmetic;
-    fn add(self, rhs: &Linear) -> Self::Output {
+    pub fn add(&self, rhs: &Linear, field_op: &dyn FieldOp) -> Arithmetic {
         // (Ax+B) + ( Cx + D) = (Ax + Cx) + ( B+D)
         // (Ax + B) + (Cy + D) = Ax + Cy + (B+D)
         Arithmetic {
             mul_terms: Vec::new(),
             linear_combinations: vec![(self.mul_scale, self.witness), (rhs.mul_scale, rhs.witness)],
-            q_c: self.add_scale + rhs.add_scale,
+            q_c: field_op.add(&self.add_scale, &rhs.add_scale),
         }
     }
-}
-
-impl Neg for &Linear {
-    type Output = Linear;
-    fn neg(self) -> Self::Output {
-        // -(Ax + B) = -Ax - B
+    pub fn sub(&self, rhs: &Linear, field_op: &dyn FieldOp) -> Arithmetic {
+        let neg_rhs = rhs.neg(field_op);
+        self.add(&neg_rhs, field_op)
+    }
+    pub fn mul_field(&self, rhs: &FieldElement, field_op: &dyn FieldOp) -> Linear {
         Linear {
-            add_scale: -self.add_scale,
+            mul_scale: field_op.mul(&self.mul_scale, &rhs),
             witness: self.witness,
-            mul_scale: -self.mul_scale,
+            add_scale: field_op.mul(&self.add_scale, &rhs),
         }
     }
-}
-
-impl Mul<&Linear> for &Linear {
-    type Output = Arithmetic;
-    #[allow(clippy::many_single_char_names)]
-    fn mul(self, rhs: &Linear) -> Self::Output {
+    pub fn add_field(&self, rhs: &FieldElement, field_op: &dyn FieldOp) -> Linear {
+        Linear {
+            mul_scale: self.mul_scale,
+            witness: self.witness,
+            add_scale: field_op.add(&self.add_scale, &rhs),
+        }
+    }
+    pub fn sub_field(&self, rhs: &FieldElement, field_op: &dyn FieldOp) -> Linear {
+        let neg_rhs = field_op.neg(rhs);
+        self.add_field(&neg_rhs, field_op)
+    }
+    pub fn mul(&self, rhs: &Linear, field_op: &dyn FieldOp) -> Arithmetic {
         // (Ax+B)(Cy+D) = ACxy + ADx + BCy + BD
         let a = self.mul_scale;
         let b = self.add_scale;
@@ -84,10 +71,10 @@ impl Mul<&Linear> for &Linear {
         let d = rhs.add_scale;
         let y = rhs.witness;
 
-        let ac = a * c;
-        let ad = a * d;
-        let bc = b * c;
-        let bd = b * d;
+        let ac = field_op.mul(&a, &c);
+        let ad = field_op.mul(&a, &d);
+        let bc = field_op.mul(&b, &c);
+        let bd = field_op.mul(&b, &d);
 
         let mul_terms = {
             let mut mt = Vec::with_capacity(1);
@@ -115,62 +102,27 @@ impl Mul<&Linear> for &Linear {
             q_c: bd,
         }
     }
-}
-impl Mul<&FieldElement> for &Linear {
-    type Output = Linear;
-    fn mul(self, rhs: &FieldElement) -> Self::Output {
+    pub fn neg(&self, field_op: &dyn FieldOp) -> Linear {
+        // -(Ax + B) = -Ax - B
         Linear {
-            mul_scale: self.mul_scale * *rhs,
+            add_scale: field_op.neg(&self.add_scale),
             witness: self.witness,
-            add_scale: self.add_scale * *rhs,
-        }
-    }
-}
-impl Add<&FieldElement> for &Linear {
-    type Output = Linear;
-    fn add(self, rhs: &FieldElement) -> Self::Output {
-        Linear {
-            mul_scale: self.mul_scale,
-            witness: self.witness,
-            add_scale: self.add_scale + *rhs,
+            mul_scale: field_op.neg(&self.mul_scale),
         }
     }
 }
 
-// Convenience Trait implementations
-impl Add<Linear> for Linear {
-    type Output = Arithmetic;
-    fn add(self, rhs: Linear) -> Self::Output {
-        &self + &rhs
+impl From<Witness> for Linear {
+    fn from(w: Witness) -> Linear {
+        Linear::from_witness(w)
     }
 }
-impl Mul<Linear> for Linear {
-    type Output = Arithmetic;
-    fn mul(self, rhs: Linear) -> Self::Output {
-        &self * &rhs
-    }
-}
-impl Add<&Linear> for Linear {
-    type Output = Arithmetic;
-    fn add(self, rhs: &Linear) -> Self::Output {
-        &self + rhs
-    }
-}
-impl Mul<&Linear> for Linear {
-    type Output = Arithmetic;
-    fn mul(self, rhs: &Linear) -> Self::Output {
-        &self * rhs
-    }
-}
-impl Sub<&Linear> for &Linear {
-    type Output = Arithmetic;
-    fn sub(self, rhs: &Linear) -> Self::Output {
-        self + &-rhs
-    }
-}
-impl Sub<&FieldElement> for &Linear {
-    type Output = Linear;
-    fn sub(self, rhs: &FieldElement) -> Self::Output {
-        self + &-*rhs
+impl From<FieldElement> for Linear {
+    fn from(element: FieldElement) -> Linear {
+        Linear {
+            add_scale: element,
+            witness: Witness::default(),
+            mul_scale: FieldElement::zero(),
+        }
     }
 }
