@@ -1,5 +1,8 @@
 use codespan::{ByteIndex, Span as ByteSpan};
-use std::hash::{Hash, Hasher};
+use std::{
+    hash::{Hash, Hasher},
+    ops::Deref,
+};
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Hash, Debug, Copy, Clone)]
 pub struct Position {
@@ -115,6 +118,14 @@ impl<T> Spanned<T> {
 
 impl<T> std::borrow::Borrow<T> for Spanned<T> {
     fn borrow(&self) -> &T {
+        &self.contents
+    }
+}
+
+impl<T> Deref for Spanned<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
         &self.contents
     }
 }
