@@ -173,7 +173,7 @@ impl Array {
         env: &mut Environment,
         expr_id: &ExprId,
     ) -> Result<Array, RuntimeErrorKind> {
-        let object = evaluator.expression_to_object(env, expr_id)?;
+        let object = evaluator.expression_to_object(env, expr_id)?.contents;
         match object {
             Object::Array(arr) => Ok(arr),
             _ => Err(RuntimeErrorKind::expected_type("array", object.r#type())),

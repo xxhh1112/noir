@@ -14,6 +14,7 @@ use acvm::acir::native_types::{Arithmetic, Linear, Witness};
 use environment::{Environment, FuncContext};
 use errors::RuntimeErrorKind;
 use noir_field::FieldElement;
+use noirc_errors::Spanned;
 use noirc_frontend::hir::Context;
 use noirc_frontend::hir_def::{
     expr::{
@@ -24,7 +25,7 @@ use noirc_frontend::hir_def::{
 };
 use noirc_frontend::node_interner::{ExprId, FuncId, IdentId, StmtId};
 use noirc_frontend::{FunctionKind, Type};
-use object::{Array, Integer, Object, RangedObject};
+use object::{Array, Integer, Object, RangedObject, SpannedObject};
 pub struct Evaluator<'a> {
     // Why is this not u64?
     //
@@ -299,7 +300,7 @@ impl<'a> Evaluator<'a> {
                 Ok(Object::Null)
             }
             HirStatement::Expression(expr) | HirStatement::Semi(expr) => {
-                self.expression_to_object(env, &expr)
+                Ok(self.expression_to_object(env, &expr)?.contents)
             }
             HirStatement::Let(let_stmt) => {
                 // let statements are used to declare a higher level object
@@ -318,7 +319,7 @@ impl<'a> Evaluator<'a> {
         env: &mut Environment,
         x: HirPrivateStatement,
     ) -> Result<Object, RuntimeErrorKind> {
-        let rhs_poly = self.expression_to_object(env, &x.expression)?;
+        let rhs_poly = self.expression_to_object(env, &x.expression)?.contents;
 
         let variable_name = self.context.def_interner.ident_name(&x.identifier);
         // We do not store it in the environment yet, because it may need to be casted to an integer
@@ -379,8 +380,12 @@ impl<'a> Evaluator<'a> {
         env: &mut Environment,
         constrain_stmt: HirConstrainStatement,
     ) -> Result<Object, RuntimeErrorKind> {
-        let lhs_poly = self.expression_to_object(env, &constrain_stmt.0.lhs)?;
-        let rhs_poly = self.expression_to_object(env, &constrain_stmt.0.rhs)?;
+        let lhs_poly = self
+            .expression_to_object(env, &constrain_stmt.0.lhs)?
+            .contents;
+        let rhs_poly = self
+            .expression_to_object(env, &constrain_stmt.0.rhs)?
+            .contents;
 
         // Evaluate the constrain infix statement
         let _ = self.evaluate_infix_expression(
@@ -435,7 +440,9 @@ impl<'a> Evaluator<'a> {
         // we can extend into a separate (generic) module
 
         // Extract the array
-        let rhs_poly = self.expression_to_object(env, &let_stmt.expression)?;
+        let rhs_poly = self
+            .expression_to_object(env, &let_stmt.expression)?
+            .contents;
 
         match rhs_poly {
             Object::Array(arr) => {
@@ -497,7 +504,7 @@ impl<'a> Evaluator<'a> {
         env: &mut Environment,
         expr_id: &ExprId,
     ) -> Result<Object, RuntimeErrorKind> {
-        let polynomial = self.expression_to_object(env, expr_id)?;
+        let polynomial = self.expression_to_object(env, expr_id)?.contents;
 
         if polynomial.is_constant() {
             return Ok(polynomial);
@@ -512,21 +519,23 @@ impl<'a> Evaluator<'a> {
         &mut self,
         env: &mut Environment,
         expr_id: &ExprId,
-    ) -> Result<Object, RuntimeErrorKind> {
+    ) -> Result<SpannedObject, RuntimeErrorKind> {
         let expr = self.context.def_interner.expression(expr_id);
-        match expr {
+        let span = self.context.def_interner.expr_span(expr_id);
+
+        let obj = match expr {
             HirExpression::Literal(HirLiteral::Integer(x)) => Ok(Object::Constants(x)),
             HirExpression::Literal(HirLiteral::Array(arr_lit)) => {
                 Ok(Object::Array(Array::from(self, env, arr_lit)?))
             }
             HirExpression::Ident(x) => Ok(self.evaluate_identifier(&x, env)),
             HirExpression::Infix(infx) => {
-                let lhs = self.expression_to_object(env, &infx.lhs)?;
-                let rhs = self.expression_to_object(env, &infx.rhs)?;
+                let lhs = self.expression_to_object(env, &infx.lhs)?.contents;
+                let rhs = self.expression_to_object(env, &infx.rhs)?.contents;
                 self.evaluate_infix_expression(lhs, rhs, infx.operator)
             }
             HirExpression::Cast(cast_expr) => {
-                let lhs = self.expression_to_object(env, &cast_expr.lhs)?;
+                let lhs = self.expression_to_object(env, &cast_expr.lhs)?.contents;
                 binary_op::handle_cast_op(self,lhs, cast_expr.r#type)
             }
             HirExpression::Index(indexed_expr) => {
@@ -572,7 +581,8 @@ impl<'a> Evaluator<'a> {
             HirExpression::Predicate(_) => todo!(),
             HirExpression::Literal(_) => todo!(),
             HirExpression::Block(_) => todo!("currently block expressions not in for/if branches are not being evaluated. In the future, we should be able to unify the eval_block and all places which require block_expr here")
-        }
+        }?;
+        Ok(Spanned::from(span, obj))
     }
 
     fn call_function(
@@ -639,7 +649,11 @@ impl<'a> Evaluator<'a> {
             .map(|expr| self.expression_to_object(env, expr))
             .partition(Result::is_ok);
 
-        let objects: Vec<_> = objects.into_iter().map(Result::unwrap).collect();
+        let objects: Vec<_> = objects
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|obj| obj.contents)
+            .collect();
         let errors: Vec<_> = errors.into_iter().map(Result::unwrap_err).collect();
         (objects, errors)
     }
