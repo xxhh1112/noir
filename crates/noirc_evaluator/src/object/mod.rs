@@ -7,6 +7,7 @@ pub use integer::Integer;
 use acvm::acir::circuit::gate::Gate;
 use acvm::acir::native_types::{Arithmetic, Linear, Witness};
 use noir_field::FieldElement;
+use noirc_errors::Spanned;
 
 use crate::Evaluator;
 
@@ -21,6 +22,8 @@ pub enum Object {
     Constants(FieldElement),
     Linear(Linear), // These will be selector * witness(var_name) + selector // Note that this is not a gate e.g `5x+6` does not apply a gate
 }
+
+pub type SpannedObject = Spanned<Object>;
 
 impl Object {
     pub fn r#type(&self) -> &'static str {
