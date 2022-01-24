@@ -120,6 +120,7 @@ where
             [(LeftParen, RightParen), (LeftBracket, RightBracket)],
             |_| (vec![], None),
         ))
+        .recover_with(skip_until([], |_| BlockExpression(vec![])))
         .map(into_block)
 }
 
@@ -602,6 +603,8 @@ fn fixed_array_size() -> impl NoirParser<ArraySize> {
 
 #[cfg(test)]
 mod test {
+    use noirc_errors::Span;
+
     use super::*;
 
     fn parse_with<P, T>(parser: P, program: &str) -> Result<T, Vec<ParserError>>
@@ -614,6 +617,18 @@ mod test {
             return Err(lexer_errors.into_iter().map(Into::into).collect());
         }
         parser.then_ignore(just(Token::EOF)).parse(tokens)
+    }
+
+    fn parse_recover_with<P, T>(parser: P, program: &str) -> (Option<T>, Vec<ParserError>)
+    where
+        P: NoirParser<T>,
+    {
+        let lexer = Lexer::new(program);
+        let (tokens, lexer_errors) = lexer.lex();
+        let eof = just(Token::EOF).recover_with(skip_until([Token::EOF], |_| Token::EOF));
+        let (tree, mut errors) = parser.then_ignore(eof).parse_recovery(tokens);
+        errors.append(&mut lexer_errors.into_iter().map(Into::into).collect());
+        (tree, errors)
     }
 
     fn parse_all<P, T>(parser: P, programs: Vec<&str>) -> Vec<T>
@@ -1025,5 +1040,23 @@ mod test {
             use_statement(),
             vec!["use std as ;", "use foobar as as;", "use hello:: as foo;"],
         );
+    }
+
+    #[test]
+    fn parse_expression_recovery() {
+        let cases = vec![
+            ("foo", ExpressionKind::Ident("foo".to_owned()), 0),
+            ("(foo)", ExpressionKind::Ident("foo".to_owned()), 0),
+            ("(foo))", ExpressionKind::Ident("foo".to_owned()), 1),
+            ("{%}", ExpressionKind::Block(BlockExpression(vec![])), 1),
+            ("{", ExpressionKind::Block(BlockExpression(vec![])), 1),
+        ];
+
+        for (text, expected, expected_error_count) in cases {
+            let expected = Some(Expression::new(expected, Span::new(0..0)));
+            let (actual, errors) = parse_recover_with(expression(), text);
+            assert_eq!(errors.len(), expected_error_count, "\nfailed to recover from parsing \"{}\"", text);
+            assert_eq!(expected, actual, "\nfailed to recover from parsing \"{}\"", text);
+        }
     }
 }
