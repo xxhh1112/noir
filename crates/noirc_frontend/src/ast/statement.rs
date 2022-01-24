@@ -90,7 +90,7 @@ pub enum Statement {
 }
 
 impl Statement {
-    pub fn new_let(((identifier, r#type), expression): ((Ident, Type), Expression)) -> Statement {
+    pub fn new_let((identifier, r#type, expression): (Ident, Type, Expression)) -> Statement {
         Statement::Let(LetStatement {
             identifier,
             r#type,
@@ -98,7 +98,7 @@ impl Statement {
         })
     }
 
-    pub fn new_const(((identifier, r#type), expression): ((Ident, Type), Expression)) -> Statement {
+    pub fn new_const((identifier, r#type, expression): (Ident, Type, Expression)) -> Statement {
         Statement::Const(ConstStatement {
             identifier,
             r#type,
@@ -106,10 +106,17 @@ impl Statement {
         })
     }
 
-    pub fn new_priv(((identifier, r#type), expression): ((Ident, Type), Expression)) -> Statement {
+    pub fn new_priv((identifier, r#type, expression): (Ident, Type, Expression)) -> Statement {
         Statement::Private(PrivateStatement {
             identifier,
             r#type,
+            expression,
+        })
+    }
+
+    pub fn new_assign((identifier, expression): (Ident, Expression)) -> Statement {
+        Statement::Assign(AssignStatement {
+            identifier,
             expression,
         })
     }

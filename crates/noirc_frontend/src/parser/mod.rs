@@ -2,14 +2,21 @@ mod errors;
 #[allow(clippy::module_inception)]
 mod parser;
 
-use crate::token::Token;
-use crate::{ast::ImportStatement, NoirFunction};
-use crate::{Expression, Ident};
+use std::cell::RefCell;
 
-use chumsky::prelude::*;
+use crate::token::{Attribute, Token};
+use crate::{ast::ImportStatement, NoirFunction};
+use crate::{BlockExpression, FunctionDefinition, Ident, Type};
+
 pub use errors::ParserError;
 use noirc_errors::Span;
+use nom::character::complete::satisfy;
+use nom::combinator::opt;
+use nom::multi::separated_list0;
+use nom::sequence::terminated;
 pub use parser::parse_program;
+
+use nom::Parser;
 
 #[derive(Debug)]
 enum TopLevelStatement {
@@ -18,29 +25,48 @@ enum TopLevelStatement {
     Import(ImportStatement),
 }
 
-// Helper trait that gives us simpler type signatures for return types:
-// e.g. impl Parser<T> versus impl Parser<Token, T, Error = Simple<Token>>
-pub trait NoirParser<T>: Parser<Token, T, Error = ParserError> + Sized {}
-impl<P, T> NoirParser<T> for P where P: Parser<Token, T, Error = ParserError> {}
+impl TopLevelStatement {
+    fn function((attribute, name, parameters, return_type, body): (Option<Attribute>, Ident, Vec<(Ident, Type)>, Type, BlockExpression)) -> TopLevelStatement {
+        TopLevelStatement::Function(FunctionDefinition {
+            span: name.0.span(),
+            name,
+            attribute, // XXX: Currently we only have one attribute defined. If more attributes are needed per function, we can make this a vector and make attribute definition more expressive
+            parameters,
+            body,
+            return_type,
+        }.into())
+    }
+}
 
-// ExprParser just serves as a type alias for NoirParser<Expression> + Clone
-trait ExprParser: NoirParser<Expression> + Clone {}
-impl<P> ExprParser for P where P: NoirParser<Expression> + Clone {}
+struct Input<'a> {
+    tokens: &'a [Token],
+    errors: &'a RefCell<Vec<ParserError>>,
+}
+
+type ParseResult<'a, T> = nom::IResult<Input<'a>>;
+
+// Helper trait that gives us simpler type signatures for return types:
+// e.g. impl Parser<'a, T> versus impl Parser<Input<'a>, T, ParserError>
+pub trait NoirParser<'a, T>: Parser<Input<'a>, T, ParserError> + Sized {}
+impl<'a, P, T> NoirParser<'a, T> for P where P: Parser<Input<'a>, T, Error = ParserError> {}
+
+fn token<'a>(expected: Token) -> impl NoirParser<'a, Token> {
+    satisfy(|token| token == expected)
+}
+
+fn separated_by_trailing0<'a, P1, P2, T, U>(separator: P1, repeated: P2) -> impl NoirParser<'a, Vec<T>>
+    where P1: NoirParser<'a, U> + Copy,
+          P2: NoirParser<'a, T>,
+{
+    terminated(separated_list0(separator, repeated), opt(separator))
+}
 
 fn parenthesized<P, F, T>(parser: P, default: F) -> impl NoirParser<T>
 where
     P: NoirParser<T>,
     F: Fn(Span) -> T,
 {
-    use Token::*;
-    parser
-        .delimited_by(LeftParen, RightParen)
-        .recover_with(nested_delimiters(
-            LeftParen,
-            RightParen,
-            [(LeftBracket, RightBracket)],
-            default,
-        ))
+    parser.delimited_by(Token::LeftParen, Token::RightParen)
 }
 
 fn spanned<P, T>(parser: P) -> impl NoirParser<(T, Span)>

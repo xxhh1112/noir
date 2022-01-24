@@ -97,23 +97,3 @@ impl From<Span> for Range<usize> {
         span.0.into()
     }
 }
-
-impl chumsky::Span for Span {
-    type Context = ();
-
-    type Offset = u32;
-
-    fn new(_context: Self::Context, range: Range<Self::Offset>) -> Self {
-        Span::new(range)
-    }
-
-    fn context(&self) -> Self::Context {}
-
-    fn start(&self) -> Self::Offset {
-        self.start()
-    }
-
-    fn end(&self) -> Self::Offset {
-        self.end()
-    }
-}

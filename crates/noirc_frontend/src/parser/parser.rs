@@ -1,8 +1,6 @@
-use super::{
-    foldl_with_span, parenthesized, ExprParser, NoirParser, ParsedModule, ParserError, Precedence,
-    TopLevelStatement,
-};
+use super::{Input, NoirParser, ParsedModule, ParserError, Precedence, TopLevelStatement, foldl_with_span, parenthesized, separated_by_trailing0};
 use crate::lexer::Lexer;
+use crate::parser::token;
 use crate::token::{Attribute, Keyword, Token, TokenKind};
 use crate::{
     ast::{ArraySize, Expression, ExpressionKind, Statement, Type},
@@ -10,12 +8,15 @@ use crate::{
 };
 use crate::{
     AssignStatement, BinaryOp, BinaryOpKind, BlockExpression, CastExpression, ConstrainStatement,
-    ForExpression, FunctionDefinition, Ident, IfExpression, ImportStatement, InfixExpression, Path,
+    ForExpression, Ident, IfExpression, ImportStatement, InfixExpression, Path,
     PathKind, UnaryOp,
 };
 
-use chumsky::prelude::*;
 use noirc_errors::Spanned;
+use nom::branch::alt;
+use nom::combinator::opt;
+use nom::multi::{many0, separated_list0};
+use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 
 /// TODO: We can leverage 'parse_recovery' and return both
 /// (ParsedModule, Vec<ParseError>) instead of only one
@@ -26,9 +27,7 @@ pub fn parse_program(program: &str) -> Result<ParsedModule, Vec<ParserError>> {
     let mut program = ParsedModule::with_capacity(lexer.approx_len() / APPROX_CHARS_PER_FUNCTION);
     let (tokens, lexing_errors) = lexer.lex();
 
-    let parser = top_level_statement()
-        .repeated()
-        .then_ignore(just(Token::EOF));
+    let parser = terminated(many0(top_level_statement), token(Token::EOF));
 
     let (tree, mut parsing_errors) = parser.parse_recovery(tokens);
     match tree {
@@ -53,41 +52,28 @@ pub fn parse_program(program: &str) -> Result<ParsedModule, Vec<ParserError>> {
 }
 
 fn top_level_statement() -> impl NoirParser<TopLevelStatement> {
-    choice((
-        function_definition(),
-        module_declaration().then_ignore(just(Token::Semicolon)),
-        use_statement().then_ignore(just(Token::Semicolon)),
+    alt((
+        function_definition,
+        terminated(module_declaration, token(Token::Semicolon)),
+        terminated(use_statement, token(Token::Semicolon)),
     ))
 }
 
 fn function_definition() -> impl NoirParser<TopLevelStatement> {
-    attribute()
-        .or_not()
-        .then_ignore(keyword(Keyword::Fn))
-        .then(ident())
-        .then(parenthesized(function_parameters(), |_| vec![]))
-        .then(function_return_type())
-        .then(block(expression()))
-        .map(|((((attribute, name), parameters), return_type), body)| {
-            TopLevelStatement::Function(
-                FunctionDefinition {
-                    span: name.0.span(),
-                    name,
-                    attribute, // XXX: Currently we only have one attribute defined. If more attributes are needed per function, we can make this a vector and make attribute definition more expressive
-                    parameters,
-                    body,
-                    return_type,
-                }
-                .into(),
-            )
-        })
+    tuple((
+        opt(attribute),
+        preceded(keyword(Keyword::Fn), ident),
+        parenthesized(function_parameters(), |_| vec![]),
+        function_return_type,
+        block,
+    )).map(TopLevelStatement::function)
 }
 
 fn function_return_type() -> impl NoirParser<Type> {
-    just(Token::Arrow)
-        .ignore_then(parse_type())
-        .or_not()
-        .map(|r#type| r#type.unwrap_or(Type::Unit))
+    opt(preceded(
+        token(Token::Arrow),
+        parse_type,
+    )).map(|r#type| r#type.unwrap_or(Type::Unit))
 }
 
 fn attribute() -> impl NoirParser<Attribute> {
@@ -98,28 +84,16 @@ fn attribute() -> impl NoirParser<Attribute> {
 }
 
 fn function_parameters() -> impl NoirParser<Vec<(Ident, Type)>> {
-    ident()
-        .then_ignore(just(Token::Colon))
-        .then(parse_type())
-        .separated_by(just(Token::Comma))
-        .allow_trailing()
+    separated_by_trailing0(token(Token::Comma),
+        pair(ident, preceded(token(Token::Colon), parse_type))
+    )
 }
 
-fn block<P>(expr_parser: P) -> impl NoirParser<BlockExpression>
-where
-    P: ExprParser,
-{
+fn block() -> impl NoirParser<BlockExpression> {
     use Token::*;
-    statement(expr_parser)
-        .separated_by(just(Semicolon))
-        .then(just(Semicolon).or_not())
-        .delimited_by(LeftBrace, RightBrace)
-        .recover_with(nested_delimiters(
-            LeftBrace,
-            RightBrace,
-            [(LeftParen, RightParen), (LeftBracket, RightBracket)],
-            |_| (vec![], None),
-        ))
+    let statements = separated_list0(token(Semicolon), statement);
+    let statements = pair(statements, opt(token(Semicolon)));
+    delimited(token(Token::LeftBrace), statements, token(Token::RightBrace))
         .map(into_block)
 }
 
@@ -137,49 +111,46 @@ fn into_block(
 }
 
 fn optional_type_annotation() -> impl NoirParser<Type> {
-    just(Token::Colon)
-        .ignore_then(parse_type())
-        .or_not()
+    opt(preceded(token(Token::Colon), parse_type))
         .map(|r#type| r#type.unwrap_or(Type::Unspecified))
 }
 
 fn module_declaration() -> impl NoirParser<TopLevelStatement> {
-    keyword(Keyword::Mod)
-        .ignore_then(ident())
+    preceded(keyword(Keyword::Mod), ident)
         .map(TopLevelStatement::Module)
 }
 
 fn use_statement() -> impl NoirParser<TopLevelStatement> {
-    keyword(Keyword::Use)
-        .ignore_then(path())
-        .then(keyword(Keyword::As).ignore_then(ident()).or_not())
-        .map(|(path, alias)| TopLevelStatement::Import(ImportStatement { path, alias }))
+    tuple((
+        keyword(Keyword::Use),
+        path,
+        opt(preceded(keyword(Keyword::As), ident)),
+    )).map(|(_, path, alias)| TopLevelStatement::Import(ImportStatement { path, alias }))
 }
 
 fn keyword(keyword: Keyword) -> impl NoirParser<Token> {
-    just(Token::Keyword(keyword))
+    token(Token::Keyword(keyword))
 }
 
-fn tokenkind(tokenkind: TokenKind) -> impl NoirParser<Token> {
-    filter_map(move |span, found: Token| {
-        if found.kind() == tokenkind {
-            Ok(found)
-        } else {
-            Err(ParserError::expected_label(
-                tokenkind.to_string(),
-                found,
-                span,
-            ))
+fn tokenkind<'a>(tokenkind: TokenKind) -> impl NoirParser<'a, Token> {
+    |input: Input<'a>| {
+        match input.first() {
+            Some(spannedtoken) if spannedtoken.token().kind() == tokenkind => Ok(token),
+            found => {
+                let span = found.span();
+                let found = found.map_or(Token::EOF, |spanned| spanned.into_token());
+                Err(ParserError::expected_label(tokenkind.to_string(), found, span))
+            }
         }
-    })
+    }
 }
 
 fn path() -> impl NoirParser<Path> {
-    let prefix = |key| keyword(key).ignore_then(just(Token::DoubleColon));
-    let idents = || ident().separated_by(just(Token::DoubleColon)).at_least(1);
+    let prefix = |key| keyword(key).ignore_then(token(Token::DoubleColon));
+    let idents = || ident().separated_by(token(Token::DoubleColon)).at_least(1);
     let make_path = |kind| move |segments| Path { segments, kind };
 
-    choice((
+    alt((
         prefix(Keyword::Crate)
             .ignore_then(idents())
             .map(make_path(PathKind::Crate)),
@@ -194,15 +165,12 @@ fn ident() -> impl NoirParser<Ident> {
     tokenkind(TokenKind::Ident).map_with_span(Ident::new)
 }
 
-fn statement<P>(expr_parser: P) -> impl NoirParser<Statement>
-where
-    P: ExprParser,
-{
-    choice((
-        constrain(expr_parser.clone()),
-        declaration(expr_parser.clone()),
-        assignment(expr_parser.clone()),
-        expr_parser.map(Statement::Expression),
+fn statement() -> impl NoirParser<Statement> {
+    alt((
+        constrain,
+        declaration,
+        assignment,
+        expression.map(Statement::Expression),
     ))
     .labelled("statement")
 }
@@ -219,12 +187,8 @@ fn operator_disallowed_in_constrain(operator: BinaryOpKind) -> bool {
     .contains(&operator)
 }
 
-fn constrain<P>(expr_parser: P) -> impl NoirParser<Statement>
-where
-    P: ExprParser,
-{
-    keyword(Keyword::Constrain)
-        .ignore_then(expr_parser)
+fn constrain() -> impl NoirParser<Statement> {
+    preceded(keyword(Keyword::Constrain), expression)
         .try_map(|expr, span| match expr.kind.into_infix() {
             Some(infix) if operator_disallowed_in_constrain(infix.operator.contents) => {
                 Err(ParserError::invalid_constrain_operator(infix.operator))
@@ -237,82 +201,58 @@ where
         })
 }
 
-fn declaration<P>(expr_parser: P) -> impl NoirParser<Statement>
-where
-    P: ExprParser,
-{
-    let let_statement = generic_declaration(Keyword::Let, expr_parser.clone(), Statement::new_let);
-    let priv_statement =
-        generic_declaration(Keyword::Priv, expr_parser.clone(), Statement::new_priv);
-    let const_statement = generic_declaration(Keyword::Const, expr_parser, Statement::new_const);
+fn declaration() -> impl NoirParser<Statement> {
+    let let_statement = generic_declaration(Keyword::Let, Statement::new_let);
+    let priv_statement = generic_declaration(Keyword::Priv, Statement::new_priv);
+    let const_statement = generic_declaration(Keyword::Const, Statement::new_const);
 
-    choice((let_statement, priv_statement, const_statement))
+    alt((let_statement, priv_statement, const_statement))
 }
 
-fn generic_declaration<F, P>(key: Keyword, expr_parser: P, f: F) -> impl NoirParser<Statement>
+fn generic_declaration<F>(key: Keyword, f: F) -> impl NoirParser<Statement>
 where
-    F: Fn(((Ident, Type), Expression)) -> Statement,
-    P: ExprParser,
+    F: Fn((Ident, Type, Expression)) -> Statement,
 {
-    keyword(key)
-        .ignore_then(ident())
-        .then(optional_type_annotation())
-        .then_ignore(just(Token::Assign))
-        .then(expr_parser)
-        .map(f)
+    tuple((
+        preceded(keyword(key), ident),
+        optional_type_annotation,
+        preceded(token(Token::Assign), expression),
+    )).map(f)
 }
 
-fn assignment<P>(expr_parser: P) -> impl NoirParser<Statement>
-where
-    P: ExprParser,
-{
-    ident()
-        .then_ignore(just(Token::Assign))
-        .then(expr_parser)
-        .map(|(identifier, expression)| {
-            Statement::Assign(AssignStatement {
-                identifier,
-                expression,
-            })
-        })
+fn assignment() -> impl NoirParser<Statement> {
+    pair(ident, preceded(token(Token::Assign), expression))
+        .map(Statement::new_assign)
 }
 
 fn parse_type() -> impl NoirParser<Type> {
-    choice((
-        field_type(optional_visibility()),
-        int_type(optional_visibility()),
-        array_type(optional_visibility(), parse_type_no_field_element()),
+    alt((
+        field_type(true),
+        int_type(true),
+        array_type(true),
     ))
 }
 
 fn parse_type_no_field_element() -> impl NoirParser<Type> {
-    // NOTE: Technically since we disallow multidimensional arrays our type parser
-    // does not strictly need to be recursive - we could manually unroll it by
-    // only parsing an integer or field type as our array elements. If/when Noir's
-    // types become truly recursive though this will be necessary
-    recursive(|type_parser| {
-        choice((
-            field_type(no_visibility()),
-            int_type(no_visibility()),
-            array_type(no_visibility(), type_parser),
-        ))
-    })
-    .boxed()
+    alt((
+        field_type(false),
+        int_type(false),
+        array_type(false),
+    ))
 }
 
-// Parse nothing, just return a FieldElementType::Private
+// Parse nothing, token return a FieldElementType::Private
 fn no_visibility() -> impl NoirParser<FieldElementType> {
-    just([]).or_not().map(|_| FieldElementType::Private)
+    token([]).or_not().map(|_| FieldElementType::Private)
 }
 
 fn optional_visibility() -> impl NoirParser<FieldElementType> {
-    choice((
+    opt(alt((
         keyword(Keyword::Pub).map(|_| FieldElementType::Public),
         keyword(Keyword::Priv).map(|_| FieldElementType::Private),
         keyword(Keyword::Const).map(|_| FieldElementType::Constant),
-    ))
-    .or_not()
-    .map(|opt| opt.unwrap_or(FieldElementType::Private))
+    )))
+    .map(|option| option.unwrap_or(FieldElementType::Private))
 }
 
 fn field_type<P>(visibility_parser: P) -> impl NoirParser<Type>
@@ -346,9 +286,9 @@ where
     T: NoirParser<Type>,
 {
     visibility_parser
-        .then_ignore(just(Token::LeftBracket))
+        .then_ignore(token(Token::LeftBracket))
         .then(fixed_array_size().or_not())
-        .then_ignore(just(Token::RightBracket))
+        .then_ignore(token(Token::RightBracket))
         .then(type_parser)
         .try_map(|((visibility, size), element_type), span| {
             if let Type::Array(..) = &element_type {
@@ -470,7 +410,7 @@ where
         .ignore_then(ident())
         .then_ignore(keyword(Keyword::In))
         .then(expr_parser.clone())
-        .then_ignore(just(Token::DoubleDot))
+        .then_ignore(token(Token::DoubleDot))
         .then(expr_parser.clone())
         .then(block(expr_parser))
         .map(|(((identifier, start_range), end_range), block)| {
@@ -497,7 +437,7 @@ where
     P: ExprParser,
 {
     expr_parser
-        .separated_by(just(Token::Comma))
+        .separated_by(token(Token::Comma))
         .allow_trailing()
 }
 
@@ -505,7 +445,7 @@ fn not<P>(term_parser: P) -> impl NoirParser<ExpressionKind>
 where
     P: ExprParser,
 {
-    just(Token::Bang)
+    token(Token::Bang)
         .ignore_then(term_parser)
         .map(|rhs| ExpressionKind::prefix(UnaryOp::Not, rhs))
 }
@@ -514,7 +454,7 @@ fn negation<P>(term_parser: P) -> impl NoirParser<ExpressionKind>
 where
     P: ExprParser,
 {
-    just(Token::Minus)
+    token(Token::Minus)
         .ignore_then(term_parser)
         .map(|rhs| ExpressionKind::prefix(UnaryOp::Minus, rhs))
 }
@@ -613,7 +553,7 @@ mod test {
         if !lexer_errors.is_empty() {
             return Err(lexer_errors.into_iter().map(Into::into).collect());
         }
-        parser.then_ignore(just(Token::EOF)).parse(tokens)
+        parser.then_ignore(token(Token::EOF)).parse(tokens)
     }
 
     fn parse_all<P, T>(parser: P, programs: Vec<&str>) -> Vec<T>
