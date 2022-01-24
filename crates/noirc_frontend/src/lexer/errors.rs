@@ -1,5 +1,3 @@
-use crate::token::SpannedToken;
-
 use super::token::Token;
 use noirc_errors::CustomDiagnostic as Diagnostic;
 use noirc_errors::{DiagnosableError, Span};
@@ -79,12 +77,5 @@ impl DiagnosableError for LexerErrorKind {
     fn to_diagnostic(&self) -> Diagnostic {
         let (primary, secondary, span) = self.parts();
         Diagnostic::simple_error(primary, secondary, span)
-    }
-}
-
-impl From<LexerErrorKind> for chumsky::error::Simple<SpannedToken, Span> {
-    fn from(error: LexerErrorKind) -> Self {
-        let (_, message, span) = error.parts();
-        chumsky::error::Simple::custom(span, message)
     }
 }

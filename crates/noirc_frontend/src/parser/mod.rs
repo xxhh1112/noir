@@ -1,14 +1,13 @@
 mod errors;
 #[allow(clippy::module_inception)]
 mod parser;
+mod combinators;
 
 use crate::token::Token;
 use crate::{ast::ImportStatement, NoirFunction};
-use crate::{Expression, Ident};
+use crate::Ident;
 
-use chumsky::prelude::*;
 pub use errors::ParserError;
-use noirc_errors::Span;
 pub use parser::parse_program;
 
 #[derive(Debug)]
@@ -16,62 +15,6 @@ enum TopLevelStatement {
     Function(NoirFunction),
     Module(Ident),
     Import(ImportStatement),
-}
-
-// Helper trait that gives us simpler type signatures for return types:
-// e.g. impl Parser<T> versus impl Parser<Token, T, Error = Simple<Token>>
-pub trait NoirParser<T>: Parser<Token, T, Error = ParserError> + Sized {}
-impl<P, T> NoirParser<T> for P where P: Parser<Token, T, Error = ParserError> {}
-
-// ExprParser just serves as a type alias for NoirParser<Expression> + Clone
-trait ExprParser: NoirParser<Expression> + Clone {}
-impl<P> ExprParser for P where P: NoirParser<Expression> + Clone {}
-
-fn parenthesized<P, F, T>(parser: P, default: F) -> impl NoirParser<T>
-where
-    P: NoirParser<T>,
-    F: Fn(Span) -> T,
-{
-    use Token::*;
-    parser
-        .delimited_by(LeftParen, RightParen)
-        .recover_with(nested_delimiters(
-            LeftParen,
-            RightParen,
-            [(LeftBracket, RightBracket)],
-            default,
-        ))
-}
-
-fn spanned<P, T>(parser: P) -> impl NoirParser<(T, Span)>
-where
-    P: NoirParser<T>,
-{
-    parser.map_with_span(|value, span| (value, span))
-}
-
-// Parse with the first parser, then continue by
-// repeating the second parser 0 or more times.
-// The passed in function is then used to combine the
-// results of both parsers along with their spans at
-// each step.
-fn foldl_with_span<P1, P2, T1, T2, F>(
-    first_parser: P1,
-    to_be_repeated: P2,
-    f: F,
-) -> impl NoirParser<T1>
-where
-    P1: NoirParser<T1>,
-    P2: NoirParser<T2>,
-    F: Fn((T1, Span), (T2, Span)) -> T1,
-{
-    spanned(first_parser)
-        .then(spanned(to_be_repeated).repeated())
-        .foldl(move |a, b| {
-            let span = a.1;
-            (f(a, b), span)
-        })
-        .map(|(value, _span)| value)
 }
 
 #[derive(Clone, Debug)]

@@ -109,11 +109,8 @@ impl From<LexerErrorKind> for ParserError {
     }
 }
 
-impl chumsky::Error<Token> for ParserError {
-    type Span = Span;
-    type Label = String;
-
-    fn expected_input_found<Iter>(span: Self::Span, expected: Iter, found: Option<Token>) -> Self
+impl ParserError {
+    fn expected_input_found<Iter>(span: Span, expected: Iter, found: Option<Token>) -> Self
     where
         Iter: IntoIterator<Item = Option<Token>>,
     {
@@ -130,8 +127,8 @@ impl chumsky::Error<Token> for ParserError {
         }
     }
 
-    fn with_label(mut self, label: Self::Label) -> Self {
-        self.expected_labels.insert(label);
+    pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
+        self.expected_labels.insert(label.into());
         self
     }
 
@@ -140,7 +137,7 @@ impl chumsky::Error<Token> for ParserError {
     // that reason and discard the other if present.
     // The spans of both errors must match, otherwise the error
     // messages and error spans may not line up.
-    fn merge(mut self, mut other: Self) -> Self {
+    pub fn merge(&mut self, mut other: Self) {
         self.expected_tokens.append(&mut other.expected_tokens);
         self.expected_labels.append(&mut other.expected_labels);
         self.lexer_errors.append(&mut other.lexer_errors);
@@ -150,6 +147,5 @@ impl chumsky::Error<Token> for ParserError {
         }
 
         assert_eq!(self.span, other.span);
-        self
     }
 }
