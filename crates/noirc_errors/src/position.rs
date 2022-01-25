@@ -62,6 +62,14 @@ impl Span {
         Span(ByteSpan::from(range))
     }
 
+    /// A nonsensical span for when one is needed
+    /// but none are to be had. This should be avoided
+    /// anywhere a Span may potentially be used in an
+    /// error message.
+    pub fn nonsense() -> Span {
+        Span::single_char(0)
+    }
+
     pub fn exclusive(start: u32, end: u32) -> Span {
         Span::new(start..end)
     }

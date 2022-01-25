@@ -445,6 +445,9 @@ impl<'a> Resolver<'a> {
                 self.interner.push_expr(HirExpression::Ident(ident_id))
             }
             ExpressionKind::Block(block_expr) => self.resolve_block(block_expr),
+            ExpressionKind::Error => {
+                self.interner.push_expr(HirExpression::Error)
+            },
         };
 
         self.interner.push_expr_span(expr_id, expr.span);

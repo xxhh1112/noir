@@ -19,6 +19,7 @@ pub enum ExpressionKind {
     For(Box<ForExpression>),
     If(Box<IfExpression>),
     Path(Path),
+    Error,
 }
 
 impl ExpressionKind {
@@ -138,6 +139,14 @@ impl Expression {
 
         let ident = Ident(Spanned::from(self.span, identifier));
         Some(ident)
+    }
+
+    pub fn error() -> Expression {
+        Expression::spanned_error(Span::nonsense())
+    }
+
+    pub fn spanned_error(span: Span) -> Expression {
+        Expression::new(ExpressionKind::Error, span)
     }
 }
 
@@ -367,6 +376,7 @@ impl Display for ExpressionKind {
             For(for_loop) => for_loop.fmt(f),
             If(if_expr) => if_expr.fmt(f),
             Path(path) => path.fmt(f),
+            Error => write!(f, "error"),
         }
     }
 }

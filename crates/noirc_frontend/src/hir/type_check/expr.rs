@@ -17,8 +17,7 @@ pub(crate) fn type_check_expression(
     interner: &mut NodeInterner,
     expr_id: &ExprId,
 ) -> Result<(), TypeCheckError> {
-    let hir_expr = interner.expression(expr_id);
-    match hir_expr {
+    match interner.expression(expr_id) {
         HirExpression::Ident(ident_id) => {
             // If an Ident is used in an expression, it cannot be a declaration statement
             let ident_def_id = interner.ident_def(&ident_id).expect("ice: all identifiers should have been resolved. This should have been caught in the resolver");
@@ -264,6 +263,8 @@ pub(crate) fn type_check_expression(
             todo!("predicate statements have not been implemented yet")
         }
         HirExpression::If(_) => todo!("If statements have not been implemented yet!"),
+        // Never give a type error for expressions that failed to parse
+        HirExpression::Error => (),
     };
     Ok(())
 }

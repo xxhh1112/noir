@@ -15,7 +15,7 @@ use crate::{
 };
 
 use chumsky::prelude::*;
-use noirc_errors::Spanned;
+use noirc_errors::{Spanned, Span};
 
 /// TODO: We can leverage 'parse_recovery' and return both
 /// (ParsedModule, Vec<ParseError>) instead of only one
@@ -120,7 +120,6 @@ where
             [(LeftParen, RightParen), (LeftBracket, RightBracket)],
             |_| (vec![], None),
         ))
-        .recover_with(skip_until([], |_| BlockExpression(vec![])))
         .map(into_block)
 }
 
@@ -176,17 +175,19 @@ fn tokenkind(tokenkind: TokenKind) -> impl NoirParser<Token> {
 }
 
 fn path() -> impl NoirParser<Path> {
-    let prefix = |key| keyword(key).ignore_then(just(Token::DoubleColon));
     let idents = || ident().separated_by(just(Token::DoubleColon)).at_least(1);
     let make_path = |kind| move |segments| Path { segments, kind };
 
+    let path_kind = |key, kind| {
+        keyword(key)
+            .ignore_then(just(Token::DoubleColon))
+            .ignore_then(idents())
+            .map(make_path(kind))
+    };
+
     choice((
-        prefix(Keyword::Crate)
-            .ignore_then(idents())
-            .map(make_path(PathKind::Crate)),
-        prefix(Keyword::Dep)
-            .ignore_then(idents())
-            .map(make_path(PathKind::Dep)),
+        path_kind(Keyword::Crate, PathKind::Crate),
+        path_kind(Keyword::Dep, PathKind::Dep),
         idents().map(make_path(PathKind::Plain)),
     ))
 }
@@ -242,10 +243,11 @@ fn declaration<P>(expr_parser: P) -> impl NoirParser<Statement>
 where
     P: ExprParser,
 {
-    let let_statement = generic_declaration(Keyword::Let, expr_parser.clone(), Statement::new_let);
-    let priv_statement =
-        generic_declaration(Keyword::Priv, expr_parser.clone(), Statement::new_priv);
-    let const_statement = generic_declaration(Keyword::Const, expr_parser, Statement::new_const);
+    let (expr_parser2, expr_parser3) = (expr_parser.clone(), expr_parser.clone());
+
+    let let_statement = generic_declaration(Keyword::Let, expr_parser, Statement::new_let);
+    let priv_statement = generic_declaration(Keyword::Priv, expr_parser2, Statement::new_priv);
+    let const_statement = generic_declaration(Keyword::Const, expr_parser3, Statement::new_const);
 
     choice((let_statement, priv_statement, const_statement))
 }
@@ -255,12 +257,24 @@ where
     F: Fn(((Ident, Type), Expression)) -> Statement,
     P: ExprParser,
 {
-    keyword(key)
-        .ignore_then(ident())
+    let ident = ident()
+        .recover_with(skip_then_retry_until([Token::Assign, Token::Colon]))
+        .recover_with(skip_until([Token::Assign, Token::Colon], |span| Ident::from_str("_", span)))
+        .or_not()
+        .map(|opt| opt.unwrap_or(Ident::from_str("_", Span::nonsense())));
+
+    let expr = expr_parser
+        .recover_with(skip_until([Token::Semicolon, Token::RightBrace, Token::EOF], |span| Expression::spanned_error(span)))
+        .or_not()
+        .map(|option| option.unwrap_or(Expression::error()));
+
+    let infallible = ident
         .then(optional_type_annotation())
-        .then_ignore(just(Token::Assign))
-        .then(expr_parser)
-        .map(f)
+        .then_ignore(just([Token::Assign]).or_not())
+        .then(expr)
+        .map(f);
+
+    keyword(key).ignore_then(infallible)
 }
 
 fn assignment<P>(expr_parser: P) -> impl NoirParser<Statement>
@@ -626,7 +640,7 @@ mod test {
         let lexer = Lexer::new(program);
         let (tokens, lexer_errors) = lexer.lex();
         let eof = just(Token::EOF).recover_with(skip_until([Token::EOF], |_| Token::EOF));
-        let (tree, mut errors) = parser.then_ignore(eof).parse_recovery(tokens);
+        let (tree, mut errors) = parser.then_ignore(eof).parse_recovery_verbose(tokens);
         errors.append(&mut lexer_errors.into_iter().map(Into::into).collect());
         (tree, errors)
     }
@@ -1056,7 +1070,29 @@ mod test {
             let expected = Some(Expression::new(expected, Span::new(0..0)));
             let (actual, errors) = parse_recover_with(expression(), text);
             assert_eq!(errors.len(), expected_error_count, "\nfailed to recover from parsing \"{}\"", text);
-            assert_eq!(expected, actual, "\nfailed to recover from parsing \"{}\"", text);
+            assert_eq!(actual, expected, "\nfailed to recover from parsing \"{}\"", text);
+        }
+    }
+
+    #[test]
+    fn parse_let_recovery() {
+        let cases = vec![
+            ("let x = foo", "let x: unspecified = foo", 0),
+            ("let : : Field = foo", "let _: priv Field = foo", 1),
+            // ("let = foo", "let _: unspecified = foo", 1),  This case is currently failing due to
+            //                    a bug in chumsky where skip_until always skips at least one token
+            // Failing: ("let name foo", "let name: unspecified = foo", 1),
+            ("let name =", "let name: unspecified = error", 1),
+            ("let =", "let _: unspecified = error", 2),
+            ("let", "let _: unspecified = error", 3),
+        ];
+
+        for (text, expected, expected_error_count) in cases {
+            let (actual, errors) = parse_recover_with(declaration(expression()), text);
+            let actual = actual.expect(&format!("Failed to parse {}", text)).to_string();
+
+            assert_eq!(errors.len(), expected_error_count, "\nfailed to recover from parsing \"{}\"", text);
+            assert_eq!(actual, expected, "\nfailed to recover from parsing \"{}\"", text);
         }
     }
 }

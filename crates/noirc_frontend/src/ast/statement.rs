@@ -69,6 +69,10 @@ impl Ident {
     pub fn new(token: Token, span: Span) -> Ident {
         Ident::from(SpannedToken::new(token, span))
     }
+
+    pub fn from_str<S: Into<String>>(string: S, span: Span) -> Ident {
+        Ident::from(Spanned::from(span, string.into()))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

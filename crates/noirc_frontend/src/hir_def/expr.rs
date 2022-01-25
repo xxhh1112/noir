@@ -16,6 +16,7 @@ pub enum HirExpression {
     Predicate(HirInfixExpression),
     For(HirForExpression),
     If(IfExpression),
+    Error,
 }
 
 impl HirExpression {
