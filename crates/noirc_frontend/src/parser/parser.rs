@@ -280,16 +280,15 @@ where
         .map(|(visibility, int_type)| Type::from_int_tok(visibility, &int_type))
 }
 
-fn array_type<V, T>(visibility_parser: V, type_parser: T) -> impl NoirParser<Type>
+fn array_type<V, T>(visibility_parser: V) -> impl NoirParser<Type>
 where
     V: NoirParser<FieldElementType>,
-    T: NoirParser<Type>,
 {
     visibility_parser
         .then_ignore(token(Token::LeftBracket))
         .then(fixed_array_size().or_not())
         .then_ignore(token(Token::RightBracket))
-        .then(type_parser)
+        .then(parse_type_no_field_element)
         .try_map(|((visibility, size), element_type), span| {
             if let Type::Array(..) = &element_type {
                 return Err(ParserError::with_reason(
@@ -363,36 +362,24 @@ fn operator_with_precedence(precedence: Precedence) -> impl NoirParser<Spanned<B
     })
 }
 
-fn term<'a, P>(expr_parser: P) -> impl NoirParser<Expression> + 'a
-where
-    P: ExprParser + 'a,
-{
-    recursive(move |term_parser| {
-        choice((
-            if_expr(expr_parser.clone()),
-            for_expr(expr_parser.clone()),
-            array_expr(expr_parser.clone()),
-            not(term_parser.clone()),
-            negation(term_parser),
-            block(expr_parser.clone()).map(ExpressionKind::Block),
-        ))
-        .map_with_span(Expression::new)
-        .or(value_or_cast(expr_parser))
-    })
+fn term() -> impl NoirParser<Expression> + 'a {
+    alt((
+        if_expr,
+        for_expr,
+        array_expr,
+        not,
+        negation,
+        block.map(ExpressionKind::Block),
+    ))
+    .map_with_span(Expression::new)
+    .or(value_or_cast)
 }
 
-fn if_expr<P>(expr_parser: P) -> impl NoirParser<ExpressionKind>
-where
-    P: ExprParser,
-{
+fn if_expr() -> impl NoirParser<ExpressionKind> {
     keyword(Keyword::If)
-        .ignore_then(expr_parser.clone())
-        .then(block(expr_parser.clone()))
-        .then(
-            keyword(Keyword::Else)
-                .ignore_then(block(expr_parser))
-                .or_not(),
-        )
+        .ignore_then(expression)
+        .then(block)
+        .then(opt(keyword(Keyword::Else).ignore_then(block)))
         .map(|((condition, consequence), alternative)| {
             ExpressionKind::If(Box::new(IfExpression {
                 condition,
@@ -402,17 +389,14 @@ where
         })
 }
 
-fn for_expr<P>(expr_parser: P) -> impl NoirParser<ExpressionKind>
-where
-    P: ExprParser,
-{
+fn for_expr() -> impl NoirParser<ExpressionKind> {
     keyword(Keyword::For)
-        .ignore_then(ident())
+        .ignore_then(ident)
         .then_ignore(keyword(Keyword::In))
-        .then(expr_parser.clone())
+        .then(expression)
         .then_ignore(token(Token::DoubleDot))
-        .then(expr_parser.clone())
-        .then(block(expr_parser))
+        .then(expression)
+        .then(block)
         .map(|(((identifier, start_range), end_range), block)| {
             ExpressionKind::For(Box::new(ForExpression {
                 identifier,
@@ -423,67 +407,49 @@ where
         })
 }
 
-fn array_expr<P>(expr_parser: P) -> impl NoirParser<ExpressionKind>
-where
-    P: ExprParser,
-{
+fn array_expr<P>(expr_parser: P) -> impl NoirParser<ExpressionKind> {
     expression_list(expr_parser)
         .delimited_by(Token::LeftBracket, Token::RightBracket)
         .map(ExpressionKind::array)
 }
 
-fn expression_list<P>(expr_parser: P) -> impl NoirParser<Vec<Expression>>
-where
-    P: ExprParser,
-{
-    expr_parser
+fn expression_list<P>(expr_parser: P) -> impl NoirParser<Vec<Expression>> {
+    expression
         .separated_by(token(Token::Comma))
         .allow_trailing()
 }
 
-fn not<P>(term_parser: P) -> impl NoirParser<ExpressionKind>
-where
-    P: ExprParser,
-{
+fn not<P>(term_parser: P) -> impl NoirParser<ExpressionKind> {
     token(Token::Bang)
         .ignore_then(term_parser)
         .map(|rhs| ExpressionKind::prefix(UnaryOp::Not, rhs))
 }
 
-fn negation<P>(term_parser: P) -> impl NoirParser<ExpressionKind>
-where
-    P: ExprParser,
-{
+fn negation<P>(term_parser: P) -> impl NoirParser<ExpressionKind> {
     token(Token::Minus)
         .ignore_then(term_parser)
         .map(|rhs| ExpressionKind::prefix(UnaryOp::Minus, rhs))
 }
 
-fn value<P>(expr_parser: P) -> impl NoirParser<Expression>
-where
-    P: ExprParser,
-{
-    choice((
-        function_call(expr_parser.clone()),
-        array_access(expr_parser.clone()),
-        variable(),
-        literal(),
+fn value() -> impl NoirParser<Expression> {
+    alt((
+        function_call,
+        array_access,
+        variable,
+        literal,
     ))
     .map_with_span(Expression::new)
-    .or(parenthesized(expr_parser, |span| {
+    .or(parenthesized(expression, |span| {
         Expression::new(ExpressionKind::Block(BlockExpression(vec![])), span)
     }))
 }
 
 // This function is parses a value followed by 0 or more cast expressions.
-fn value_or_cast<P>(expr_parser: P) -> impl NoirParser<Expression>
-where
-    P: ExprParser,
-{
-    let cast_rhs = keyword(Keyword::As).ignore_then(parse_type_no_field_element());
+fn value_or_cast() -> impl NoirParser<Expression> {
+    let cast_rhs = keyword(Keyword::As).ignore_then(parse_type_no_field_element);
 
     foldl_with_span(
-        value(expr_parser),
+        value,
         cast_rhs,
         |(lhs, lhs_span), (r#type, rhs_span)| Expression {
             kind: ExpressionKind::Cast(Box::new(CastExpression { lhs, r#type })),
@@ -492,21 +458,15 @@ where
     )
 }
 
-fn function_call<P>(expr_parser: P) -> impl NoirParser<ExpressionKind>
-where
-    P: ExprParser,
-{
-    path()
-        .then(parenthesized(expression_list(expr_parser), |_| vec![]))
+fn function_call() -> impl NoirParser<ExpressionKind> {
+    path
+        .then(parenthesized(expression_list, |_| vec![]))
         .map(|(path, args)| ExpressionKind::function_call(path, args))
 }
 
-fn array_access<P>(expr_parser: P) -> impl NoirParser<ExpressionKind>
-where
-    P: ExprParser,
-{
-    ident()
-        .then(expr_parser.delimited_by(Token::LeftBracket, Token::RightBracket))
+fn array_access() -> impl NoirParser<ExpressionKind> {
+    ident
+        .then(expression.delimited_by(Token::LeftBracket, Token::RightBracket))
         .map(|(variable, index)| ExpressionKind::index(variable, index))
 }
 
@@ -625,22 +585,22 @@ mod test {
             "crate::foo (x)",
             "hash (x,)",
         ];
-        parse_all(function_call(expression()), valid);
+        parse_all(function_call, valid);
     }
 
     #[test]
     fn parse_cast() {
         parse_all(
-            value_or_cast(expression()),
+            value_or_cast,
             vec!["x as u8", "0 as Field", "(x + 3) as [8]Field"],
         );
-        parse_all_failing(value_or_cast(expression()), vec!["x as pub u8"]);
+        parse_all_failing(value_or_cast, vec!["x as pub u8"]);
     }
 
     #[test]
     fn parse_array_index() {
         let valid = vec!["x[9]", "y[x+a]", " foo [foo+5]", "baz[bar]"];
-        parse_all(array_access(expression()), valid);
+        parse_all(array_access, valid);
     }
 
     use crate::{ArrayLiteral, Literal};
@@ -665,7 +625,7 @@ mod test {
             "[0,1,2,3,4,]", // Trailing commas are valid syntax
         ];
 
-        for expr in parse_all(array_expr(expression()), valid) {
+        for expr in parse_all(array_expr, valid) {
             let arr_lit = expr_to_array(expr);
             assert_eq!(arr_lit.length, 5);
 
@@ -677,17 +637,17 @@ mod test {
         }
 
         parse_all_failing(
-            array_expr(expression()),
+            array_expr,
             vec!["0,1,2,3,4]", "[[0,1,2,3,4]", "[0,1,2,,]", "[0,1,2,3,4"],
         );
     }
 
     #[test]
     fn parse_block() {
-        parse_with(block(expression()), "{ [0,1,2,3,4] }").unwrap();
+        parse_with(block, "{ [0,1,2,3,4] }").unwrap();
 
         parse_all_failing(
-            block(expression()),
+            block,
             vec![
                 "[0,1,2,3,4] }",
                 "{ [0,1,2,3,4]",
@@ -702,7 +662,7 @@ mod test {
     /// This is the standard way to declare a constrain statement
     #[test]
     fn parse_constrain() {
-        parse_with(constrain(expression()), "constrain x == y").unwrap();
+        parse_with(constrain, "constrain x == y").unwrap();
 
         // Currently we disallow constrain statements where the outer infix operator
         // produces a value. This would require an implicit `==` which
@@ -721,7 +681,7 @@ mod test {
 
         for operator in disallowed_operators {
             let src = format!("constrain x {} y;", operator.as_string());
-            parse_with(constrain(expression()), &src).unwrap_err();
+            parse_with(constrain, &src).unwrap_err();
         }
 
         // These are general cases which should always work.
@@ -731,7 +691,7 @@ mod test {
         // The outer layer is an infix `==` which is
         // associated with the Constrain statement
         parse_all(
-            constrain(expression()),
+            constrain,
             vec![
                 "constrain ((x + y) == k) + z == y",
                 "constrain (x + !y) == y",
@@ -750,14 +710,14 @@ mod test {
         // long as it is a type. Other statements such as Public are type checked
         // Because for now, they can only have one type
         parse_all(
-            declaration(expression()),
+            declaration,
             vec!["let x = y", "let x : u8 = y"],
         );
     }
     #[test]
     fn parse_priv() {
         parse_all(
-            declaration(expression()),
+            declaration,
             vec!["priv x = y", "priv x : pub Field = y"],
         );
     }
@@ -766,7 +726,7 @@ mod test {
     fn parse_invalid_pub() {
         // pub cannot be used to declare a statement
         parse_all_failing(
-            statement(expression()),
+            statement,
             vec!["pub x = y", "pub x : pub Field = y"],
         );
     }
@@ -776,7 +736,7 @@ mod test {
         // XXX: We have `Constant` because we may allow constants to
         // be casted to integers. Maybe rename this to `Field` instead
         parse_all(
-            declaration(expression()),
+            declaration,
             vec!["const x = y", "const x : const Field = y"],
         );
     }
@@ -784,12 +744,12 @@ mod test {
     #[test]
     fn parse_for_loop() {
         parse_all(
-            for_expr(expression()),
+            for_expr,
             vec!["for i in x+y..z {}", "for i in 0..100 { foo; bar }"],
         );
 
         parse_all_failing(
-            for_expr(expression()),
+            for_expr,
             vec![
                 "for 1 in x+y..z {}",  // Cannot have a literal as the loop identifier
                 "for i in 0...100 {}", // Only '..' is supported, there are no inclusive ranges yet
@@ -824,22 +784,22 @@ mod test {
     #[test]
     fn parse_parenthesized_expression() {
         parse_all(
-            value(expression()),
+            value,
             vec!["(0)", "(x+a)", "({(({{({(nested)})}}))})"],
         );
 
-        parse_all_failing(value(expression()), vec!["(x+a", "((x+a)", "()"]);
+        parse_all_failing(value, vec!["(x+a", "((x+a)", "()"]);
     }
 
     #[test]
     fn parse_if_expr() {
         parse_all(
-            if_expr(expression()),
+            if_expr,
             vec!["if x + a {  } else {  }", "if x {}"],
         );
 
         parse_all_failing(
-            if_expr(expression()),
+            if_expr,
             vec![
                 "if (x / a) + 1 {} else",
                 "if foo then 1 else 2",
@@ -943,10 +903,10 @@ mod test {
     #[test]
     fn parse_unary() {
         parse_all(
-            term(expression()),
+            term,
             vec!["!hello", "-hello", "--hello", "-!hello", "!-hello"],
         );
-        parse_all_failing(term(expression()), vec!["+hello", "/hello"]);
+        parse_all_failing(term, vec!["+hello", "/hello"]);
     }
 
     #[test]
