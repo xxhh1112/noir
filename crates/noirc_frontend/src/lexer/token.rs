@@ -536,29 +536,3 @@ fn test_variant_equality() {
     let tok4 = Token::LeftBrace;
     assert!(!tok.is_variant(&tok4));
 }
-
-pub struct Tokens(pub Vec<SpannedToken>);
-
-impl<'a> From<Tokens>
-    for chumsky::Stream<
-        'a,
-        Token,
-        Span,
-        Map<IntoIter<SpannedToken>, fn(SpannedToken) -> (Token, Span)>,
-    >
-{
-    fn from(tokens: Tokens) -> Self {
-        let end_of_input = match tokens.0.last() {
-            Some(spanned_token) => spanned_token.to_span(),
-            None => Span::single_char(0),
-        };
-
-        fn get_span(token: SpannedToken) -> (Token, Span) {
-            let span = token.to_span();
-            (token.into_token(), span)
-        }
-
-        let iter = tokens.0.into_iter().map(get_span as fn(_) -> _);
-        chumsky::Stream::from_iter(end_of_input, iter)
-    }
-}

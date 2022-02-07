@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::lexer::errors::LexerErrorKind;
 use crate::lexer::token::Token;
+use crate::token::SpannedToken;
 use crate::BinaryOp;
 
 use noirc_errors::CustomDiagnostic as Diagnostic;
@@ -109,47 +110,20 @@ impl From<LexerErrorKind> for ParserError {
     }
 }
 
-impl chumsky::Error<Token> for ParserError {
-    type Span = Span;
-    type Label = String;
-
-    fn expected_input_found<Iter>(span: Self::Span, expected: Iter, found: Option<Token>) -> Self
-    where
-        Iter: IntoIterator<Item = Option<Token>>,
-    {
-        ParserError {
-            expected_tokens: expected
-                .into_iter()
-                .map(|opt| opt.unwrap_or(Token::EOF))
-                .collect(),
-            expected_labels: BTreeSet::new(),
-            found: found.unwrap_or(Token::EOF),
-            lexer_errors: vec![],
-            reason: None,
-            span,
-        }
+impl nom::error::ParseError<SpannedToken> for ParserError {
+    fn from_error_kind(input: SpannedToken, kind: nom::error::ErrorKind) -> Self {
+        todo!()
     }
 
-    fn with_label(mut self, label: Self::Label) -> Self {
-        self.expected_labels.insert(label);
-        self
+    fn append(input: SpannedToken, kind: nom::error::ErrorKind, other: Self) -> Self {
+        todo!()
     }
 
-    // Merge two errors into a new one that should encompass both.
-    // If one error has a more specific reason with it then keep
-    // that reason and discard the other if present.
-    // The spans of both errors must match, otherwise the error
-    // messages and error spans may not line up.
-    fn merge(mut self, mut other: Self) -> Self {
-        self.expected_tokens.append(&mut other.expected_tokens);
-        self.expected_labels.append(&mut other.expected_labels);
-        self.lexer_errors.append(&mut other.lexer_errors);
+    fn from_char(input: SpannedToken, _: char) -> Self {
+        Self::from_error_kind(input, nom::error::ErrorKind::Char)
+    }
 
-        if self.reason.is_none() {
-            self.reason = other.reason;
-        }
-
-        assert_eq!(self.span, other.span);
-        self
+    fn or(self, other: Self) -> Self {
+        other
     }
 }

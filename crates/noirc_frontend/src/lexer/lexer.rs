@@ -1,6 +1,6 @@
 use super::{
     errors::LexerErrorKind,
-    token::{Attribute, IntType, Keyword, SpannedToken, Token, Tokens},
+    token::{Attribute, IntType, Keyword, SpannedToken, Token},
 };
 use acvm::FieldElement;
 use fm::File;
@@ -49,7 +49,7 @@ impl<'a> Lexer<'a> {
         size_hint
     }
 
-    pub fn lex(self) -> (Tokens, Vec<LexerErrorKind>) {
+    pub fn lex(self) -> (Vec<SpannedToken>, Vec<LexerErrorKind>) {
         let mut tokens = vec![];
         let mut errors = vec![];
         for result in self {
@@ -58,7 +58,7 @@ impl<'a> Lexer<'a> {
                 Err(error) => errors.push(error),
             }
         }
-        (Tokens(tokens), errors)
+        (tokens, errors)
     }
 
     /// Iterates the cursor and returns the char at the new cursor position

@@ -1,4 +1,7 @@
-use super::{Input, NoirParser, ParsedModule, ParserError, Precedence, TopLevelStatement, foldl_with_span, parenthesized, separated_by_trailing0};
+use super::{
+    filter_map, foldl_with_span, parenthesized, separated_by_trailing0, Input, NoirParser, PResult,
+    ParsedModule, ParserError, Precedence, TopLevelStatement,
+};
 use crate::lexer::Lexer;
 use crate::parser::token;
 use crate::token::{Attribute, Keyword, Token, TokenKind};
@@ -7,9 +10,8 @@ use crate::{
     FieldElementType,
 };
 use crate::{
-    AssignStatement, BinaryOp, BinaryOpKind, BlockExpression, CastExpression, ConstrainStatement,
-    ForExpression, Ident, IfExpression, ImportStatement, InfixExpression, Path,
-    PathKind, UnaryOp,
+    BinaryOp, BinaryOpKind, BlockExpression, CastExpression, ConstrainStatement, ForExpression,
+    Ident, IfExpression, ImportStatement, InfixExpression, Path, PathKind, UnaryOp,
 };
 
 use noirc_errors::Spanned;
@@ -51,7 +53,7 @@ pub fn parse_program(program: &str) -> Result<ParsedModule, Vec<ParserError>> {
     }
 }
 
-fn top_level_statement() -> impl NoirParser<TopLevelStatement> {
+fn top_level_statement<'a>() -> impl NoirParser<'a, TopLevelStatement> {
     alt((
         function_definition,
         terminated(module_declaration, token(Token::Semicolon)),
@@ -59,42 +61,45 @@ fn top_level_statement() -> impl NoirParser<TopLevelStatement> {
     ))
 }
 
-fn function_definition() -> impl NoirParser<TopLevelStatement> {
+fn function_definition<'a>() -> impl NoirParser<'a, TopLevelStatement> {
     tuple((
         opt(attribute),
         preceded(keyword(Keyword::Fn), ident),
         parenthesized(function_parameters(), |_| vec![]),
         function_return_type,
         block,
-    )).map(TopLevelStatement::function)
+    ))
+    .map(TopLevelStatement::function)
 }
 
-fn function_return_type() -> impl NoirParser<Type> {
-    opt(preceded(
-        token(Token::Arrow),
-        parse_type,
-    )).map(|r#type| r#type.unwrap_or(Type::Unit))
+fn function_return_type<'a>() -> impl NoirParser<'a, Type> {
+    opt(preceded(token(Token::Arrow), parse_type)).map(|r#type| r#type.unwrap_or(Type::Unit))
 }
 
-fn attribute() -> impl NoirParser<Attribute> {
+fn attribute<'a>() -> impl NoirParser<'a, Attribute> {
     tokenkind(TokenKind::Attribute).map(|token| match token {
         Token::Attribute(attribute) => attribute,
         _ => unreachable!(),
     })
 }
 
-fn function_parameters() -> impl NoirParser<Vec<(Ident, Type)>> {
-    separated_by_trailing0(token(Token::Comma),
-        pair(ident, preceded(token(Token::Colon), parse_type))
+fn function_parameters<'a>() -> impl NoirParser<'a, Vec<(Ident, Type)>> {
+    separated_by_trailing0(
+        token(Token::Comma),
+        pair(ident, preceded(token(Token::Colon), parse_type)),
     )
 }
 
-fn block() -> impl NoirParser<BlockExpression> {
+fn block<'a>() -> impl NoirParser<'a, BlockExpression> {
     use Token::*;
     let statements = separated_list0(token(Semicolon), statement);
     let statements = pair(statements, opt(token(Semicolon)));
-    delimited(token(Token::LeftBrace), statements, token(Token::RightBrace))
-        .map(into_block)
+    delimited(
+        token(Token::LeftBrace),
+        statements,
+        token(Token::RightBrace),
+    )
+    .map(into_block)
 }
 
 fn into_block(
@@ -110,42 +115,43 @@ fn into_block(
     BlockExpression(statements)
 }
 
-fn optional_type_annotation() -> impl NoirParser<Type> {
-    opt(preceded(token(Token::Colon), parse_type))
-        .map(|r#type| r#type.unwrap_or(Type::Unspecified))
+fn optional_type_annotation<'a>() -> impl NoirParser<'a, Type> {
+    opt(preceded(token(Token::Colon), parse_type)).map(|r#type| r#type.unwrap_or(Type::Unspecified))
 }
 
-fn module_declaration() -> impl NoirParser<TopLevelStatement> {
-    preceded(keyword(Keyword::Mod), ident)
-        .map(TopLevelStatement::Module)
+fn module_declaration<'a>() -> impl NoirParser<'a, TopLevelStatement> {
+    preceded(keyword(Keyword::Mod), ident).map(TopLevelStatement::Module)
 }
 
-fn use_statement() -> impl NoirParser<TopLevelStatement> {
+fn use_statement<'a>() -> impl NoirParser<'a, TopLevelStatement> {
     tuple((
         keyword(Keyword::Use),
         path,
         opt(preceded(keyword(Keyword::As), ident)),
-    )).map(|(_, path, alias)| TopLevelStatement::Import(ImportStatement { path, alias }))
+    ))
+    .map(|(_, path, alias)| TopLevelStatement::Import(ImportStatement { path, alias }))
 }
 
-fn keyword(keyword: Keyword) -> impl NoirParser<Token> {
+fn keyword<'a>(keyword: Keyword) -> impl NoirParser<'a, Token> {
     token(Token::Keyword(keyword))
 }
 
 fn tokenkind<'a>(tokenkind: TokenKind) -> impl NoirParser<'a, Token> {
-    |input: Input<'a>| {
-        match input.first() {
-            Some(spannedtoken) if spannedtoken.token().kind() == tokenkind => Ok(token),
-            found => {
-                let span = found.span();
-                let found = found.map_or(Token::EOF, |spanned| spanned.into_token());
-                Err(ParserError::expected_label(tokenkind.to_string(), found, span))
-            }
+    |input: Input<'a>| match input.first() {
+        Some(spannedtoken) if spannedtoken.token().kind() == tokenkind => Ok(token),
+        found => {
+            let span = found.span();
+            let found = found.map_or(Token::EOF, |spanned| spanned.into_token());
+            Err(ParserError::expected_label(
+                tokenkind.to_string(),
+                found,
+                span,
+            ))
         }
     }
 }
 
-fn path() -> impl NoirParser<Path> {
+fn path<'a>() -> impl NoirParser<'a, Path> {
     let prefix = |key| keyword(key).ignore_then(token(Token::DoubleColon));
     let idents = || ident().separated_by(token(Token::DoubleColon)).at_least(1);
     let make_path = |kind| move |segments| Path { segments, kind };
@@ -161,11 +167,11 @@ fn path() -> impl NoirParser<Path> {
     ))
 }
 
-fn ident() -> impl NoirParser<Ident> {
+fn ident<'a>() -> impl NoirParser<'a, Ident> {
     tokenkind(TokenKind::Ident).map_with_span(Ident::new)
 }
 
-fn statement() -> impl NoirParser<Statement> {
+fn statement<'a>() -> impl NoirParser<'a, Statement> {
     alt((
         constrain,
         declaration,
@@ -187,9 +193,9 @@ fn operator_disallowed_in_constrain(operator: BinaryOpKind) -> bool {
     .contains(&operator)
 }
 
-fn constrain() -> impl NoirParser<Statement> {
-    preceded(keyword(Keyword::Constrain), expression)
-        .try_map(|expr, span| match expr.kind.into_infix() {
+fn constrain<'a>() -> impl NoirParser<'a, Statement> {
+    preceded(keyword(Keyword::Constrain), expression).try_map(|expr, span| {
+        match expr.kind.into_infix() {
             Some(infix) if operator_disallowed_in_constrain(infix.operator.contents) => {
                 Err(ParserError::invalid_constrain_operator(infix.operator))
             }
@@ -198,10 +204,11 @@ fn constrain() -> impl NoirParser<Statement> {
                 span,
             )),
             Some(infix) => Ok(Statement::Constrain(ConstrainStatement(infix))),
-        })
+        }
+    })
 }
 
-fn declaration() -> impl NoirParser<Statement> {
+fn declaration<'a>() -> impl NoirParser<'a, Statement> {
     let let_statement = generic_declaration(Keyword::Let, Statement::new_let);
     let priv_statement = generic_declaration(Keyword::Priv, Statement::new_priv);
     let const_statement = generic_declaration(Keyword::Const, Statement::new_const);
@@ -209,7 +216,7 @@ fn declaration() -> impl NoirParser<Statement> {
     alt((let_statement, priv_statement, const_statement))
 }
 
-fn generic_declaration<F>(key: Keyword, f: F) -> impl NoirParser<Statement>
+fn generic_declaration<'a, F>(key: Keyword, f: F) -> impl NoirParser<'a, Statement>
 where
     F: Fn((Ident, Type, Expression)) -> Statement,
 {
@@ -217,36 +224,28 @@ where
         preceded(keyword(key), ident),
         optional_type_annotation,
         preceded(token(Token::Assign), expression),
-    )).map(f)
-}
-
-fn assignment() -> impl NoirParser<Statement> {
-    pair(ident, preceded(token(Token::Assign), expression))
-        .map(Statement::new_assign)
-}
-
-fn parse_type() -> impl NoirParser<Type> {
-    alt((
-        field_type(true),
-        int_type(true),
-        array_type(true),
     ))
+    .map(f)
 }
 
-fn parse_type_no_field_element() -> impl NoirParser<Type> {
-    alt((
-        field_type(false),
-        int_type(false),
-        array_type(false),
-    ))
+fn assignment<'a>() -> impl NoirParser<'a, Statement> {
+    pair(ident, preceded(token(Token::Assign), expression)).map(Statement::new_assign)
+}
+
+fn parse_type<'a>() -> impl NoirParser<'a, Type> {
+    alt((field_type(true), int_type(true), array_type(true)))
+}
+
+fn parse_type_no_field_element<'a>() -> impl NoirParser<'a, Type> {
+    alt((field_type(false), int_type(false), array_type(false)))
 }
 
 // Parse nothing, token return a FieldElementType::Private
-fn no_visibility() -> impl NoirParser<FieldElementType> {
+fn no_visibility<'a>() -> impl NoirParser<'a, FieldElementType> {
     token([]).or_not().map(|_| FieldElementType::Private)
 }
 
-fn optional_visibility() -> impl NoirParser<FieldElementType> {
+fn optional_visibility<'a>() -> impl NoirParser<'a, FieldElementType> {
     opt(alt((
         keyword(Keyword::Pub).map(|_| FieldElementType::Public),
         keyword(Keyword::Priv).map(|_| FieldElementType::Private),
@@ -255,18 +254,18 @@ fn optional_visibility() -> impl NoirParser<FieldElementType> {
     .map(|option| option.unwrap_or(FieldElementType::Private))
 }
 
-fn field_type<P>(visibility_parser: P) -> impl NoirParser<Type>
+fn field_type<'a, P>(visibility_parser: P) -> impl NoirParser<'a, Type>
 where
-    P: NoirParser<FieldElementType>,
+    P: NoirParser<'a, FieldElementType>,
 {
     visibility_parser
         .then_ignore(keyword(Keyword::Field))
         .map(Type::FieldElement)
 }
 
-fn int_type<P>(visibility_parser: P) -> impl NoirParser<Type>
+fn int_type<'a, P>(visibility_parser: P) -> impl NoirParser<'a, Type>
 where
-    P: NoirParser<FieldElementType>,
+    P: NoirParser<'a, FieldElementType>,
 {
     visibility_parser
         .then(filter_map(|span, token: Token| match token {
@@ -280,9 +279,9 @@ where
         .map(|(visibility, int_type)| Type::from_int_tok(visibility, &int_type))
 }
 
-fn array_type<V, T>(visibility_parser: V) -> impl NoirParser<Type>
+fn array_type<'a, V, T>(visibility_parser: V) -> impl NoirParser<'a, Type>
 where
-    V: NoirParser<FieldElementType>,
+    V: NoirParser<'a, FieldElementType>,
 {
     visibility_parser
         .then_ignore(token(Token::LeftBracket))
@@ -301,29 +300,22 @@ where
         })
 }
 
-fn expression() -> impl ExprParser {
-    recursive(|expr_parser| expression_with_precedence(Precedence::Lowest, expr_parser))
+fn expression<'a>() -> impl NoirParser<'a, Expression> {
+    expression_with_precedence(Precedence::Lowest)
 }
 
 // An expression is a single term followed by 0 or more (OP subexpr)*
 // where OP is an operator at the given precedence level and subexpr
 // is an expression at the current precedence level plus one.
-fn expression_with_precedence<'a, P>(
-    precedence: Precedence,
-    expr_parser: P,
-) -> impl NoirParser<Expression> + 'a
-where
-    P: ExprParser + 'a,
-{
+fn expression_with_precedence<'a, P>(precedence: Precedence) -> impl NoirParser<'a, Expression> {
     if precedence == Precedence::Highest {
-        term(expr_parser).boxed()
+        term.boxed()
     } else {
-        expression_with_precedence(precedence.higher(), expr_parser.clone())
-            .then(
+        expression_with_precedence(precedence.higher())
+            .then(many0(
                 operator_with_precedence(precedence)
-                    .then(expression_with_precedence(precedence.higher(), expr_parser))
-                    .repeated(),
-            )
+                    .then(expression_with_precedence(precedence.higher())),
+            ))
             .foldl(create_infix_expression)
             .boxed()
     }
@@ -347,7 +339,9 @@ fn create_infix_expression(lhs: Expression, (operator, rhs): (BinaryOp, Expressi
     }
 }
 
-fn operator_with_precedence(precedence: Precedence) -> impl NoirParser<Spanned<BinaryOpKind>> {
+fn operator_with_precedence<'a>(
+    precedence: Precedence,
+) -> impl NoirParser<'a, Spanned<BinaryOpKind>> {
     filter_map(move |span, token: Token| {
         if Precedence::token_precedence(&token) == Some(precedence) {
             let bin_op_kind: Option<BinaryOpKind> = (&token).into();
@@ -362,7 +356,7 @@ fn operator_with_precedence(precedence: Precedence) -> impl NoirParser<Spanned<B
     })
 }
 
-fn term() -> impl NoirParser<Expression> + 'a {
+fn term<'a>() -> impl NoirParser<'a, Expression> {
     alt((
         if_expr,
         for_expr,
@@ -375,7 +369,7 @@ fn term() -> impl NoirParser<Expression> + 'a {
     .or(value_or_cast)
 }
 
-fn if_expr() -> impl NoirParser<ExpressionKind> {
+fn if_expr<'a>() -> impl NoirParser<'a, ExpressionKind> {
     keyword(Keyword::If)
         .ignore_then(expression)
         .then(block)
@@ -389,7 +383,7 @@ fn if_expr() -> impl NoirParser<ExpressionKind> {
         })
 }
 
-fn for_expr() -> impl NoirParser<ExpressionKind> {
+fn for_expr<'a>() -> impl NoirParser<'a, ExpressionKind> {
     keyword(Keyword::For)
         .ignore_then(ident)
         .then_ignore(keyword(Keyword::In))
@@ -407,74 +401,66 @@ fn for_expr() -> impl NoirParser<ExpressionKind> {
         })
 }
 
-fn array_expr<P>(expr_parser: P) -> impl NoirParser<ExpressionKind> {
-    expression_list(expr_parser)
+fn array_expr<'a>() -> impl NoirParser<'a, ExpressionKind> {
+    expression_list
         .delimited_by(Token::LeftBracket, Token::RightBracket)
         .map(ExpressionKind::array)
 }
 
-fn expression_list<P>(expr_parser: P) -> impl NoirParser<Vec<Expression>> {
+fn expression_list<'a>() -> impl NoirParser<'a, Vec<Expression>> {
     expression
         .separated_by(token(Token::Comma))
         .allow_trailing()
 }
 
-fn not<P>(term_parser: P) -> impl NoirParser<ExpressionKind> {
+fn not<'a>() -> impl NoirParser<'a, ExpressionKind> {
     token(Token::Bang)
-        .ignore_then(term_parser)
+        .ignore_then(term)
         .map(|rhs| ExpressionKind::prefix(UnaryOp::Not, rhs))
 }
 
-fn negation<P>(term_parser: P) -> impl NoirParser<ExpressionKind> {
+fn negation<'a>() -> impl NoirParser<'a, ExpressionKind> {
     token(Token::Minus)
-        .ignore_then(term_parser)
+        .ignore_then(term)
         .map(|rhs| ExpressionKind::prefix(UnaryOp::Minus, rhs))
 }
 
-fn value() -> impl NoirParser<Expression> {
-    alt((
-        function_call,
-        array_access,
-        variable,
-        literal,
-    ))
-    .map_with_span(Expression::new)
-    .or(parenthesized(expression, |span| {
-        Expression::new(ExpressionKind::Block(BlockExpression(vec![])), span)
-    }))
+fn value<'a>() -> impl NoirParser<'a, Expression> {
+    alt((function_call, array_access, variable, literal))
+        .map_with_span(Expression::new)
+        .or(parenthesized(expression, |span| {
+            Expression::new(ExpressionKind::Block(BlockExpression(vec![])), span)
+        }))
 }
 
 // This function is parses a value followed by 0 or more cast expressions.
-fn value_or_cast() -> impl NoirParser<Expression> {
+fn value_or_cast<'a>() -> impl NoirParser<'a, Expression> {
     let cast_rhs = keyword(Keyword::As).ignore_then(parse_type_no_field_element);
 
-    foldl_with_span(
-        value,
-        cast_rhs,
-        |(lhs, lhs_span), (r#type, rhs_span)| Expression {
+    foldl_with_span(value, cast_rhs, |(lhs, lhs_span), (r#type, rhs_span)| {
+        Expression {
             kind: ExpressionKind::Cast(Box::new(CastExpression { lhs, r#type })),
             span: lhs_span.merge(rhs_span),
-        },
-    )
+        }
+    })
 }
 
-fn function_call() -> impl NoirParser<ExpressionKind> {
-    path
-        .then(parenthesized(expression_list, |_| vec![]))
+fn function_call<'a>() -> impl NoirParser<'a, ExpressionKind> {
+    path.then(parenthesized(expression_list, |_| vec![]))
         .map(|(path, args)| ExpressionKind::function_call(path, args))
 }
 
-fn array_access() -> impl NoirParser<ExpressionKind> {
+fn array_access<'a>() -> impl NoirParser<'a, ExpressionKind> {
     ident
         .then(expression.delimited_by(Token::LeftBracket, Token::RightBracket))
         .map(|(variable, index)| ExpressionKind::index(variable, index))
 }
 
-fn variable() -> impl NoirParser<ExpressionKind> {
+fn variable<'a>() -> impl NoirParser<'a, ExpressionKind> {
     ident().map(|name| ExpressionKind::Ident(name.0.contents))
 }
 
-fn literal() -> impl NoirParser<ExpressionKind> {
+fn literal<'a>() -> impl NoirParser<'a, ExpressionKind> {
     tokenkind(TokenKind::Literal).map(|token| match token {
         Token::Int(x) => ExpressionKind::integer(x),
         Token::Bool(b) => ExpressionKind::boolean(b),
@@ -483,7 +469,7 @@ fn literal() -> impl NoirParser<ExpressionKind> {
     })
 }
 
-fn fixed_array_size() -> impl NoirParser<ArraySize> {
+fn fixed_array_size<'a>() -> impl NoirParser<'a, ArraySize> {
     filter_map(|span, token: Token| match token {
         Token::Int(integer) => {
             if !integer.fits_in_u128() {
@@ -504,9 +490,9 @@ fn fixed_array_size() -> impl NoirParser<ArraySize> {
 mod test {
     use super::*;
 
-    fn parse_with<P, T>(parser: P, program: &str) -> Result<T, Vec<ParserError>>
+    fn parse_with<'a, P, T>(parser: P, program: &str) -> Result<T, Vec<ParserError>>
     where
-        P: NoirParser<T>,
+        P: NoirParser<'a, T>,
     {
         let lexer = Lexer::new(program);
         let (tokens, lexer_errors) = lexer.lex();
@@ -709,26 +695,17 @@ mod test {
         // Let statements are not type checked here, so the parser will accept as
         // long as it is a type. Other statements such as Public are type checked
         // Because for now, they can only have one type
-        parse_all(
-            declaration,
-            vec!["let x = y", "let x : u8 = y"],
-        );
+        parse_all(declaration, vec!["let x = y", "let x : u8 = y"]);
     }
     #[test]
     fn parse_priv() {
-        parse_all(
-            declaration,
-            vec!["priv x = y", "priv x : pub Field = y"],
-        );
+        parse_all(declaration, vec!["priv x = y", "priv x : pub Field = y"]);
     }
 
     #[test]
     fn parse_invalid_pub() {
         // pub cannot be used to declare a statement
-        parse_all_failing(
-            statement,
-            vec!["pub x = y", "pub x : pub Field = y"],
-        );
+        parse_all_failing(statement, vec!["pub x = y", "pub x : pub Field = y"]);
     }
 
     #[test]
@@ -783,20 +760,14 @@ mod test {
 
     #[test]
     fn parse_parenthesized_expression() {
-        parse_all(
-            value,
-            vec!["(0)", "(x+a)", "({(({{({(nested)})}}))})"],
-        );
+        parse_all(value, vec!["(0)", "(x+a)", "({(({{({(nested)})}}))})"]);
 
         parse_all_failing(value, vec!["(x+a", "((x+a)", "()"]);
     }
 
     #[test]
     fn parse_if_expr() {
-        parse_all(
-            if_expr,
-            vec!["if x + a {  } else {  }", "if x {}"],
-        );
+        parse_all(if_expr, vec!["if x + a {  } else {  }", "if x {}"]);
 
         parse_all_failing(
             if_expr,
