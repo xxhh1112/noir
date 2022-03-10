@@ -1,21 +1,14 @@
 pub mod ast;
+pub mod ast_resolved;
 pub mod graph;
 pub mod lexer;
 pub mod node_interner;
 pub mod parser;
+pub mod resolver;
+pub mod type_checker;
 pub mod util;
 
-pub mod hir;
-pub mod hir_def;
-
-// Lexer API
-pub use lexer::token;
-
-// Parser API
-pub use parser::{parse_program, ParsedModule};
-
-// AST API
 pub use ast::*;
-
-// Type API
-pub use hir_def::types::*;
+pub use ast_resolved::types::*;
+pub use lexer::token;
+pub use parser::{parse_program, ParsedModule};

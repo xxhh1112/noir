@@ -3,7 +3,7 @@ use crate::{Ident, Path};
 use std::collections::HashMap;
 
 use crate::graph::CrateId;
-use crate::hir::def_map::{CrateDefMap, ModuleDefId, ModuleId};
+use crate::resolver::def_map::{CrateDefMap, ModuleDefId, ModuleId};
 
 pub trait PathResolver {
     fn resolve(

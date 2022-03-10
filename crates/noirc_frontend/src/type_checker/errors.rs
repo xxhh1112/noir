@@ -2,15 +2,15 @@ use noirc_errors::CustomDiagnostic as Diagnostic;
 pub use noirc_errors::Span;
 use thiserror::Error;
 
-use crate::hir_def::expr::HirBinaryOp;
-use crate::hir_def::types::Type;
+use crate::ast_resolved::types::Type;
 use crate::node_interner::NodeInterner;
+use crate::BinaryOp;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum TypeCheckError {
     #[error("operator {op:?} cannot be used in a {place:?}")]
     OpCannotBeUsed {
-        op: HirBinaryOp,
+        op: BinaryOp,
         place: &'static str,
         span: Span,
     },

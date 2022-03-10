@@ -14,39 +14,39 @@
 #[derive(Debug, PartialEq, Eq)]
 struct ResolverMeta {
     num_times_used: usize,
+    ident: Ident,
     id: IdentId,
 }
 
-use crate::hir_def::expr::{
-    HirArrayLiteral, HirBinaryOp, HirBlockExpression, HirCallExpression, HirCastExpression,
-    HirConstructorExpression, HirForExpression, HirIfExpression, HirIndexExpression,
-    HirInfixExpression, HirLiteral, HirMemberAccess, HirMethodCallExpression, HirPrefixExpression,
-    HirUnaryOp,
+use crate::ast_resolved::expr::{
+    RArrayLiteral, RBinaryOp, RBlockExpression, RCallExpression, RCastExpression,
+    RConstructorExpression, RForExpression, RIdent, RIfExpression, RIndexExpression,
+    RInfixExpression, RLiteral, RMemberAccess, RMethodCallExpression, RPrefixExpression,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use crate::ast_resolved::expr::RExpression;
+use crate::ast_resolved::stmt::{RAssignStatement, RPattern};
 use crate::graph::CrateId;
-use crate::hir::def_map::{ModuleDefId, TryFromModuleDefId};
-use crate::hir_def::expr::HirExpression;
-use crate::hir_def::stmt::{HirAssignStatement, HirPattern};
-use crate::node_interner::{ExprId, FuncId, IdentId, NodeInterner, StmtId, TypeId};
+use crate::node_interner::{FuncId, IdentId, NodeInterner, TypeId};
+use crate::resolver::def_map::{ModuleDefId, TryFromModuleDefId};
 use crate::util::vecmap;
 use crate::{
-    hir::{def_map::CrateDefMap, resolution::path_resolver::PathResolver},
+    resolver::{def_map::CrateDefMap, resolution::path_resolver::PathResolver},
     BlockExpression, Expression, ExpressionKind, FunctionKind, Ident, Literal, NoirFunction,
     Statement,
 };
 use crate::{NoirStruct, Path, Pattern, StructType, Type, UnresolvedType, ERROR_IDENT};
 use noirc_errors::{Span, Spanned};
 
-use crate::hir::scope::{
-    Scope as GenericScope, ScopeForest as GenericScopeForest, ScopeTree as GenericScopeTree,
+use crate::ast_resolved::{
+    function::{Param, RFunction},
+    stmt::{RConstrainStatement, RLetStatement, RStatement},
 };
-use crate::hir_def::{
-    function::{FuncMeta, HirFunction, Param},
-    stmt::{HirConstrainStatement, HirLetStatement, HirStatement},
+use crate::resolver::scope::{
+    Scope as GenericScope, ScopeForest as GenericScopeForest, ScopeTree as GenericScopeTree,
 };
 
 use super::errors::ResolverError;
@@ -93,44 +93,30 @@ impl<'a> Resolver<'a> {
     /// and interning the function itself
     /// We resolve and lower the function at the same time
     /// Since lowering would require scope data, unless we add an extra resolution field to the AST
-    pub fn resolve_function(
-        mut self,
-        func: NoirFunction,
-    ) -> (HirFunction, FuncMeta, Vec<ResolverError>) {
+    pub fn resolve_function(mut self, func: NoirFunction) -> (RFunction, Vec<ResolverError>) {
         self.scopes.start_function();
-        let (hir_func, func_meta) = self.intern_function(func);
+        let func = self.intern_function(func);
         let func_scope_tree = self.scopes.end_function();
 
         self.check_for_unused_variables_in_scope_tree(func_scope_tree);
 
-        (hir_func, func_meta, self.errors)
+        (func, self.errors)
     }
 
     fn check_for_unused_variables_in_scope_tree(&mut self, scope_decls: ScopeTree) {
-        let mut unused_vars = Vec::new();
-        for scope in scope_decls.0.into_iter() {
-            Resolver::check_for_unused_variables_in_local_scope(scope, &mut unused_vars);
-        }
-
-        for unused_var in unused_vars.iter() {
-            if self.interner.ident_name(unused_var) != ERROR_IDENT {
-                self.push_err(ResolverError::UnusedVariable {
-                    ident_id: *unused_var,
-                });
-            }
-        }
+        scope_decls
+            .0
+            .into_iter()
+            .flat_map(Resolver::check_for_unused_variables_in_local_scope)
+            .filter(|unused_var| unused_var != ERROR_IDENT)
+            .for_each(|ident| self.push_err(ResolverError::UnusedVariable { ident }));
     }
 
-    fn check_for_unused_variables_in_local_scope(decl_map: Scope, unused_vars: &mut Vec<IdentId>) {
-        let unused_variables = decl_map.filter(|(variable_name, metadata)| {
+    fn check_for_unused_variables_in_local_scope(decl_map: Scope) -> impl Iterator<Item = Ident> {
+        decl_map.filter_map(|(variable_name, metadata)| {
             let has_underscore_prefix = variable_name.starts_with('_'); // XXX: This is used for development mode, and will be removed
-
-            if metadata.num_times_used == 0 && !has_underscore_prefix {
-                return true;
-            }
-            false
-        });
-        unused_vars.extend(unused_variables.map(|(_, meta)| meta.id));
+            (metadata.num_times_used == 0 && !has_underscore_prefix).then(|| metadata.ident)
+        })
     }
 
     /// Run the given function in a new scope.
@@ -142,30 +128,24 @@ impl<'a> Resolver<'a> {
         ret
     }
 
-    fn add_variable_decl(&mut self, name: Ident) -> IdentId {
-        let id = self.interner.push_ident(name.clone());
-        // Variable was defined here, so it's definition links to itself
-        self.interner.linked_ident_to_def(id, id);
+    fn add_variable_decl(&mut self, name: Ident) -> RIdent {
+        let id = IdentId(self.interner.next_unique_id());
 
         let scope = self.scopes.get_mut_scope();
         let resolver_meta = ResolverMeta {
             num_times_used: 0,
+            ident: name.clone(),
             id,
         };
-        let old_value = scope.add_key_value(name.0.contents, resolver_meta);
 
-        match old_value {
-            None => {
-                // New value, do nothing
-            }
-            Some(old_value) => {
-                self.push_err(ResolverError::DuplicateDefinition {
-                    first_ident: old_value.id,
-                    second_ident: id,
-                });
-            }
+        if let Some(old_value) = scope.add_key_value(name.0.contents, resolver_meta) {
+            self.push_err(ResolverError::DuplicateDefinition {
+                first_ident: old_value.ident,
+                second_ident: name.clone(),
+            });
         }
-        id
+
+        RIdent::new(name, id)
     }
 
     // Checks for a variable having been declared before
@@ -175,44 +155,59 @@ impl<'a> Resolver<'a> {
     //
     // If a variable is not found, then an error is logged and a dummy id
     // is returned, for better error reporting UX
-    fn find_variable(&mut self, name: &Ident) -> IdentId {
-        // Give variable an IdentId. This is not a definition
-        let id = self.interner.push_ident(name.clone());
-
+    fn find_variable(&mut self, ident: Ident) -> RIdent {
         // Find the definition for this Ident
         let scope_tree = self.scopes.current_scope_tree();
-        let variable = scope_tree.find(&name.0.contents);
+        let variable = scope_tree.find(ident.name());
+
+        let mut ret = RIdent {
+            name: ident.0.contents,
+            span: ident.span(),
+            definition: IdentId::dummy_id(),
+        };
 
         if let Some(variable_found) = variable {
             variable_found.num_times_used += 1;
-            self.interner.linked_ident_to_def(id, variable_found.id);
-            return id;
+            ret.definition = variable_found.id;
+            return ret;
         }
 
-        let err = ResolverError::VariableNotDeclared {
-            name: name.0.contents.clone(),
-            span: name.0.span(),
-        };
-        self.push_err(err);
+        self.push_err(ResolverError::VariableNotDeclared {
+            name: ident.0.contents.clone(),
+            span: ident.0.span(),
+        });
 
-        IdentId::dummy_id()
+        ret
     }
 
-    pub fn intern_function(&mut self, func: NoirFunction) -> (HirFunction, FuncMeta) {
-        let func_meta = self.extract_meta(&func);
+    pub fn intern_function(&mut self, func: NoirFunction) -> RFunction {
+        let name = func.def.name;
+        let id = FuncId(self.interner.next_unique_id());
+        let attributes = func.attribute().cloned();
 
-        let hir_func = match func.kind {
-            FunctionKind::Builtin | FunctionKind::LowLevel => HirFunction::empty(),
-            FunctionKind::Normal => {
-                let expr_id = self.intern_block(func.def.body);
+        let mut parameters = Vec::new();
+        for (pattern, typ) in func.parameters().iter().cloned() {
+            let pattern = self.resolve_pattern(pattern);
+            let typ = self.resolve_type(typ);
+            parameters.push(Param(pattern, typ));
+        }
 
-                self.interner.push_expr_span(expr_id, func.def.span);
+        let return_type = self.resolve_type(func.return_type());
 
-                HirFunction::unsafe_from_expr(expr_id)
-            }
+        let body = match func.kind {
+            FunctionKind::Builtin | FunctionKind::LowLevel => None,
+            FunctionKind::Normal => Some(self.resolve_block(func.def.body)),
         };
 
-        (hir_func, func_meta)
+        RFunction {
+            name,
+            id,
+            kind: func.kind,
+            attributes,
+            parameters: parameters.into(),
+            return_type,
+            body,
+        }
     }
 
     fn resolve_type(&mut self, typ: UnresolvedType) -> Type {
@@ -247,100 +242,61 @@ impl<'a> Resolver<'a> {
         (fields, self.errors)
     }
 
-    /// Extract metadata from a NoirFunction
-    /// to be used in analysis and intern the function parameters
-    fn extract_meta(&mut self, func: &NoirFunction) -> FuncMeta {
-        let name = func.name().to_owned();
-        let name_id = self.interner.push_ident(func.name_ident().clone());
-        let attributes = func.attribute().cloned();
-
-        let mut parameters = Vec::new();
-        for (pattern, typ) in func.parameters().iter().cloned() {
-            let pattern = self.resolve_pattern(pattern);
-            let typ = self.resolve_type(typ);
-            parameters.push(Param(pattern, typ));
-        }
-
-        let return_type = self.resolve_type(func.return_type());
-
-        FuncMeta {
-            name,
-            name_id,
-            kind: func.kind,
-            attributes,
-            parameters: parameters.into(),
-            return_type,
-            has_body: !func.def.body.is_empty(),
-        }
-    }
-
-    pub fn intern_stmt(&mut self, stmt: Statement) -> StmtId {
+    pub fn resolve_stmt(&mut self, stmt: Statement) -> RStatement {
         match stmt {
-            Statement::Let(let_stmt) => {
-                let let_stmt = HirLetStatement {
-                    pattern: self.resolve_pattern(let_stmt.pattern),
-                    r#type: self.resolve_type(let_stmt.r#type),
-                    expression: self.resolve_expression(let_stmt.expression),
-                };
-                self.interner.push_stmt(HirStatement::Let(let_stmt))
-            }
+            Statement::Let(let_stmt) => RStatement::Let(RLetStatement {
+                pattern: self.resolve_pattern(let_stmt.pattern),
+                r#type: self.resolve_type(let_stmt.r#type),
+                expression: self.resolve_expression_boxed(let_stmt.expression),
+            }),
             Statement::Constrain(constrain_stmt) => {
-                let lhs = self.resolve_expression(constrain_stmt.0.lhs);
-                let operator: HirBinaryOp = constrain_stmt.0.operator.into();
-                let rhs = self.resolve_expression(constrain_stmt.0.rhs);
+                let lhs = self.resolve_expression_boxed(constrain_stmt.0.lhs);
+                let operator: RBinaryOp = constrain_stmt.0.operator.into();
+                let rhs = self.resolve_expression_boxed(constrain_stmt.0.rhs);
 
-                let stmt = HirConstrainStatement(HirInfixExpression { lhs, operator, rhs });
-
-                self.interner.push_stmt(HirStatement::Constrain(stmt))
+                let stmt = RConstrainStatement(RInfixExpression { lhs, operator, rhs });
+                RStatement::Constrain(stmt)
             }
-            Statement::Expression(expr) => {
-                let stmt = HirStatement::Expression(self.resolve_expression(expr));
-                self.interner.push_stmt(stmt)
-            }
-            Statement::Semi(expr) => {
-                let stmt = HirStatement::Semi(self.resolve_expression(expr));
-                self.interner.push_stmt(stmt)
-            }
-            Statement::Assign(assign_stmt) => {
-                let identifier = self.find_variable(&assign_stmt.identifier);
-                let expression = self.resolve_expression(assign_stmt.expression);
-                let stmt = HirAssignStatement {
-                    identifier,
-                    expression,
-                };
-                self.interner.push_stmt(HirStatement::Assign(stmt))
-            }
-            Statement::Error => self.interner.push_stmt(HirStatement::Error),
+            Statement::Expression(expr) => RStatement::Expression(self.resolve_expression(expr)),
+            Statement::Semi(expr) => RStatement::Semi(self.resolve_expression(expr)),
+            Statement::Assign(assign_stmt) => RStatement::Assign(RAssignStatement {
+                identifier: self.find_variable(assign_stmt.identifier),
+                expression: self.resolve_expression_boxed(assign_stmt.expression),
+            }),
+            Statement::Error => RStatement::Error,
         }
     }
 
-    pub fn resolve_expression(&mut self, expr: Expression) -> ExprId {
-        let hir_expr = match expr.kind {
+    pub fn resolve_expression_boxed(&mut self, expr: Expression) -> Box<RExpression> {
+        Box::new(self.resolve_expression(expr))
+    }
+
+    pub fn resolve_expression(&mut self, expr: Expression) -> RExpression {
+        match expr.kind {
             ExpressionKind::Ident(string) => {
-                let span = expr.span;
-                let ident: Ident = Spanned::from(span, string).into();
-                let ident_id = self.find_variable(&ident);
-                HirExpression::Ident(ident_id)
+                let ident: Ident = Spanned::from(expr.span, string).into();
+                let ident_id = self.find_variable(ident);
+                RExpression::Ident(ident_id)
             }
-            ExpressionKind::Literal(literal) => HirExpression::Literal(match literal {
-                Literal::Bool(b) => HirLiteral::Bool(b),
-                Literal::Array(arr) => HirLiteral::Array(HirArrayLiteral {
+            ExpressionKind::Literal(literal) => RExpression::Literal(match literal {
+                Literal::Bool(b) => RLiteral::Bool(b),
+                Literal::Array(arr) => RLiteral::Array(RArrayLiteral {
                     contents: vecmap(arr.contents, |elem| self.resolve_expression(elem)),
                     length: arr.length,
                 }),
-                Literal::Integer(integer) => HirLiteral::Integer(integer),
-                Literal::Str(str) => HirLiteral::Str(str),
+                Literal::Integer(integer) => RLiteral::Integer(integer),
+                Literal::Str(str) => RLiteral::Str(str),
             }),
             ExpressionKind::Prefix(prefix) => {
-                let operator: HirUnaryOp = prefix.operator.into();
-                let rhs = self.resolve_expression(prefix.rhs);
-                HirExpression::Prefix(HirPrefixExpression { operator, rhs })
+                let operator = prefix.operator;
+                let rhs = self.resolve_expression_boxed(prefix.rhs);
+                RExpression::Prefix(RPrefixExpression { operator, rhs })
             }
             ExpressionKind::Infix(infix) => {
-                let lhs = self.resolve_expression(infix.lhs);
-                let rhs = self.resolve_expression(infix.rhs);
+                let lhs = self.resolve_expression_boxed(infix.lhs);
+                let rhs = self.resolve_expression_boxed(infix.rhs);
 
-                HirExpression::Infix(HirInfixExpression {
+                RExpression::Infix(RInfixExpression {
                     lhs,
                     operator: infix.operator.into(),
                     rhs,
@@ -350,70 +306,74 @@ impl<'a> Resolver<'a> {
                 // Get the span and name of path for error reporting
                 let func_id = self.lookup_function(call_expr.func_name);
                 let arguments = vecmap(call_expr.arguments, |arg| self.resolve_expression(arg));
-                HirExpression::Call(HirCallExpression { func_id, arguments })
+                RExpression::Call(RCallExpression { func_id, arguments })
             }
             ExpressionKind::MethodCall(call_expr) => {
                 let method = call_expr.method_name;
-                let object = self.resolve_expression(call_expr.object);
+                let object = self.resolve_expression_boxed(call_expr.object);
                 let arguments = vecmap(call_expr.arguments, |arg| self.resolve_expression(arg));
-                HirExpression::MethodCall(HirMethodCallExpression {
+                RExpression::MethodCall(RMethodCallExpression {
                     arguments,
                     method,
                     object,
                 })
             }
-            ExpressionKind::Cast(cast_expr) => HirExpression::Cast(HirCastExpression {
-                lhs: self.resolve_expression(cast_expr.lhs),
+            ExpressionKind::Cast(cast_expr) => RExpression::Cast(RCastExpression {
+                lhs: Box::new(self.resolve_expression(cast_expr.lhs)),
                 r#type: self.resolve_type(cast_expr.r#type),
             }),
             ExpressionKind::For(for_expr) => {
-                let start_range = self.resolve_expression(for_expr.start_range);
-                let end_range = self.resolve_expression(for_expr.end_range);
+                let start_range = Box::new(self.resolve_expression(for_expr.start_range));
+                let end_range = Box::new(self.resolve_expression(for_expr.end_range));
                 let (identifier, block) = (for_expr.identifier, for_expr.block);
 
-                let (identifier, block_id) = self.in_new_scope(|this| {
-                    (this.add_variable_decl(identifier), this.intern_block(block))
+                let (identifier, block) = self.in_new_scope(|this| {
+                    (
+                        this.add_variable_decl(identifier),
+                        this.resolve_block(block),
+                    )
                 });
 
-                HirExpression::For(HirForExpression {
+                RExpression::For(RForExpression {
                     start_range,
                     end_range,
-                    block: block_id,
+                    block,
                     identifier,
                 })
             }
-            ExpressionKind::If(if_expr) => HirExpression::If(HirIfExpression {
-                condition: self.resolve_expression(if_expr.condition),
-                consequence: self.intern_block(if_expr.consequence),
-                alternative: if_expr.alternative.map(|e| self.intern_block(e)),
+            ExpressionKind::If(if_expr) => RExpression::If(RIfExpression {
+                condition: self.resolve_expression_boxed(if_expr.condition),
+                consequence: self.resolve_block(if_expr.consequence),
+                alternative: if_expr.alternative.map(|e| self.resolve_block(e)),
             }),
-            ExpressionKind::Index(indexed_expr) => HirExpression::Index(HirIndexExpression {
-                collection_name: self.find_variable(&indexed_expr.collection_name),
-                index: self.resolve_expression(indexed_expr.index),
+            ExpressionKind::Index(indexed_expr) => RExpression::Index(RIndexExpression {
+                collection_name: self.find_variable(indexed_expr.collection_name),
+                index: self.resolve_expression_boxed(indexed_expr.index),
             }),
             ExpressionKind::Path(path) => {
                 // If the Path is being used as an Expression, then it is referring to an Identifier
                 //
                 // This is currently not supported : const x = foo::bar::SOME_CONST + 10;
-                let ident_id = match path.as_ident() {
+                RExpression::Ident(match path.into_ident() {
+                    Some(identifier) => self.find_variable(identifier),
                     None => {
                         self.push_err(ResolverError::PathIsNotIdent { span: path.span() });
-
-                        IdentId::dummy_id()
+                        RIdent {
+                            name: ERROR_IDENT.to_owned(),
+                            span: path.span(),
+                            definition: IdentId::dummy_id(),
+                        }
                     }
-                    Some(identifier) => self.find_variable(identifier),
-                };
-
-                HirExpression::Ident(ident_id)
+                })
             }
-            ExpressionKind::Block(block_expr) => self.resolve_block(block_expr),
+            ExpressionKind::Block(block_expr) => RExpression::Block(self.resolve_block(block_expr)),
             ExpressionKind::Constructor(constructor) => {
                 let span = constructor.type_name.span();
 
                 if let Some(typ) = self.lookup_struct(constructor.type_name) {
                     let type_id = typ.borrow().id;
 
-                    HirExpression::Constructor(HirConstructorExpression {
+                    RExpression::Constructor(RConstructorExpression {
                         type_id,
                         fields: self.resolve_constructor_fields(
                             type_id,
@@ -424,38 +384,34 @@ impl<'a> Resolver<'a> {
                         r#type: typ,
                     })
                 } else {
-                    HirExpression::Error
+                    RExpression::Error
                 }
             }
             ExpressionKind::MemberAccess(access) => {
                 // Validating whether the lhs actually has the rhs as a field
                 // needs to wait until type checking when we know the type of the lhs
-                HirExpression::MemberAccess(HirMemberAccess {
-                    lhs: self.resolve_expression(access.lhs),
+                RExpression::MemberAccess(RMemberAccess {
+                    lhs: Box::new(self.resolve_expression(access.lhs)),
                     rhs: access.rhs,
                 })
             }
-            ExpressionKind::Error => HirExpression::Error,
+            ExpressionKind::Error => RExpression::Error,
             ExpressionKind::Tuple(elements) => {
                 let elements = vecmap(elements, |elem| self.resolve_expression(elem));
-                HirExpression::Tuple(elements)
+                RExpression::Tuple(elements)
             }
-        };
-
-        let expr_id = self.interner.push_expr(hir_expr);
-        self.interner.push_expr_span(expr_id, expr.span);
-        expr_id
+        }
     }
 
-    fn resolve_pattern(&mut self, pattern: Pattern) -> HirPattern {
+    fn resolve_pattern(&mut self, pattern: Pattern) -> RPattern {
         self.resolve_pattern_mutable(pattern, None)
     }
 
-    fn resolve_pattern_mutable(&mut self, pattern: Pattern, mutable: Option<Span>) -> HirPattern {
+    fn resolve_pattern_mutable(&mut self, pattern: Pattern, mutable: Option<Span>) -> RPattern {
         match pattern {
             Pattern::Identifier(name) => {
                 let id = self.add_variable_decl(name);
-                HirPattern::Identifier(id)
+                RPattern::Identifier(id)
             }
             Pattern::Mutable(pattern, span) => {
                 if let Some(first_mut) = mutable {
@@ -466,11 +422,11 @@ impl<'a> Resolver<'a> {
                 }
 
                 let pattern = self.resolve_pattern_mutable(*pattern, Some(span));
-                HirPattern::Mutable(Box::new(pattern), span)
+                RPattern::Mutable(Box::new(pattern), span)
             }
             Pattern::Tuple(fields, span) => {
                 let fields = vecmap(fields, |field| self.resolve_pattern_mutable(field, mutable));
-                HirPattern::Tuple(fields, span)
+                RPattern::Tuple(fields, span)
             }
             Pattern::Struct(name, fields, span) => {
                 let struct_id = self.lookup_type(name);
@@ -479,7 +435,7 @@ impl<'a> Resolver<'a> {
                     |this: &mut Self, pattern| this.resolve_pattern_mutable(pattern, mutable);
                 let fields =
                     self.resolve_constructor_fields(struct_id, fields, span, resolve_field);
-                HirPattern::Struct(struct_type, fields, span)
+                RPattern::Struct(struct_type, fields, span)
             }
         }
     }
@@ -496,7 +452,7 @@ impl<'a> Resolver<'a> {
         fields: Vec<(Ident, T)>,
         span: Span,
         mut resolve_function: F,
-    ) -> Vec<(IdentId, U)>
+    ) -> Vec<(Ident, U)>
     where
         F: FnMut(&mut Self, T) -> U,
     {
@@ -523,8 +479,7 @@ impl<'a> Resolver<'a> {
                 });
             }
 
-            let name_id = self.interner.push_ident(field);
-            ret.push((name_id, resolved));
+            ret.push((field, resolved));
         }
 
         if !unseen_fields.is_empty() {
@@ -572,8 +527,8 @@ impl<'a> Resolver<'a> {
     }
 
     fn lookup_type(&mut self, path: Path) -> TypeId {
-        let ident = path.as_ident();
-        if ident.map_or(false, |i| i == "Self") {
+        let ident = path.into_ident();
+        if ident.map_or(false, |i| &i == "Self") {
             if let Some(id) = &self.self_type {
                 return *id;
             }
@@ -606,15 +561,10 @@ impl<'a> Resolver<'a> {
             })
     }
 
-    fn resolve_block(&mut self, block_expr: BlockExpression) -> HirExpression {
-        let statements =
-            self.in_new_scope(|this| vecmap(block_expr.0, |stmt| this.intern_stmt(stmt)));
-        HirExpression::Block(HirBlockExpression(statements))
-    }
-
-    fn intern_block(&mut self, block: BlockExpression) -> ExprId {
-        let hir_block = self.resolve_block(block);
-        self.interner.push_expr(hir_block)
+    fn resolve_block(&mut self, block_expr: BlockExpression) -> RBlockExpression {
+        RBlockExpression(
+            self.in_new_scope(|this| vecmap(block_expr.0, |stmt| this.resolve_stmt(stmt))),
+        )
     }
 }
 
@@ -626,14 +576,14 @@ mod test {
 
     use std::collections::HashMap;
 
-    use crate::{hir::resolution::errors::ResolverError, Ident};
+    use crate::{resolver::resolution::errors::ResolverError, Ident};
 
     use crate::graph::CrateId;
-    use crate::hir_def::function::HirFunction;
     use crate::node_interner::{FuncId, NodeInterner};
     use crate::{
-        hir::def_map::{CrateDefMap, ModuleDefId},
-        parse_program, Path,
+        parse_program,
+        resolver::def_map::{CrateDefMap, ModuleDefId},
+        Path,
     };
 
     use super::{PathResolver, Resolver};
@@ -649,22 +599,16 @@ mod test {
 
         let mut interner = NodeInterner::default();
 
-        let mut func_ids = Vec::new();
-        for _ in 0..func_namespace.len() {
-            func_ids.push(interner.push_fn(HirFunction::empty()));
-        }
-
         let mut path_resolver = TestPathResolver(HashMap::new());
-        for (name, id) in func_namespace.into_iter().zip(func_ids) {
-            path_resolver.insert_func(name, id);
+        for name in func_namespace {
+            path_resolver.insert_func(name, FuncId(interner.next_unique_id()));
         }
 
-        let def_maps: HashMap<CrateId, CrateDefMap> = HashMap::new();
-
+        let def_maps = HashMap::new();
         let mut errors = Vec::new();
         for func in program.functions {
             let resolver = Resolver::new(&mut interner, &path_resolver, &def_maps);
-            let (_, _, err) = resolver.resolve_function(func);
+            let (_, err) = resolver.resolve_function(func);
             errors.extend(err);
         }
 
@@ -710,8 +654,8 @@ mod test {
         let err = errors.pop().unwrap();
         // It should be regarding the unused variable
         match err {
-            ResolverError::UnusedVariable { ident_id } => {
-                assert_eq!(interner.ident_name(&ident_id), "y".to_owned());
+            ResolverError::UnusedVariable { ident } => {
+                assert_eq!(ident.name(), "y");
             }
             _ => unimplemented!("we should only have an unused var error"),
         }
@@ -785,9 +729,8 @@ mod test {
         // `foo::bar` does not exist
         for err in errors {
             match &err {
-                ResolverError::UnusedVariable { ident_id } => {
-                    let name = interner.ident_name(ident_id);
-                    assert_eq!(name, "z");
+                ResolverError::UnusedVariable { ident } => {
+                    assert_eq!(ident.name(), "z");
                 }
                 ResolverError::VariableNotDeclared { name, .. } => {
                     assert_eq!(name, "a");

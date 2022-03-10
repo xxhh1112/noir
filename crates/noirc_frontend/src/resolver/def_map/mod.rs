@@ -1,8 +1,8 @@
 use crate::graph::CrateId;
-use crate::hir::def_collector::dc_crate::DefCollector;
-use crate::hir::Context;
 use crate::node_interner::FuncId;
 use crate::parser::{parse_program, ParsedModule};
+use crate::resolver::def_collector::dc_crate::DefCollector;
+use crate::resolver::Context;
 use arena::{Arena, Index};
 use fm::{FileId, FileManager};
 use noirc_errors::CollectedErrors;

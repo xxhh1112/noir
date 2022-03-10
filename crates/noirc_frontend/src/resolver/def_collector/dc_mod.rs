@@ -2,17 +2,17 @@ use fm::FileId;
 use noirc_errors::{CollectedErrors, CustomDiagnostic, DiagnosableError};
 
 use crate::{
-    graph::CrateId, hir::def_collector::dc_crate::UnresolvedStruct, node_interner::TypeId, Ident,
-    NoirFunction, NoirImpl, NoirStruct, ParsedModule,
+    graph::CrateId, node_interner::TypeId, resolver::def_collector::dc_crate::UnresolvedStruct,
+    Ident, NoirFunction, NoirImpl, NoirStruct, ParsedModule,
 };
 
 use super::{
     dc_crate::{DefCollector, UnresolvedFunctions},
     errors::DefCollectorErrorKind,
 };
-use crate::hir::def_map::{parse_file, LocalModuleId, ModuleData, ModuleId, ModuleOrigin};
-use crate::hir::resolution::import::ImportDirective;
-use crate::hir::Context;
+use crate::resolver::def_map::{parse_file, LocalModuleId, ModuleData, ModuleId, ModuleOrigin};
+use crate::resolver::resolution::import::ImportDirective;
+use crate::resolver::Context;
 
 /// Given a module collect all definitions into ModuleData
 struct ModCollector<'a> {

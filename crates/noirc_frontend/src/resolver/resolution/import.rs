@@ -1,7 +1,7 @@
 use crate::graph::CrateId;
 use std::collections::HashMap;
 
-use crate::hir::def_map::{CrateDefMap, LocalModuleId, ModuleDefId, ModuleId, PerNs};
+use crate::resolver::def_map::{CrateDefMap, LocalModuleId, ModuleDefId, ModuleId, PerNs};
 use crate::{Ident, Path, PathKind};
 
 #[derive(Debug)]

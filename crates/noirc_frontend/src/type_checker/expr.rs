@@ -1,7 +1,8 @@
 use crate::{
-    hir_def::{
-        expr::{self, HirBinaryOp, HirExpression, HirLiteral},
+    ast_resolved::{
+        expr::{self, RBinaryOp, RExpression, RLiteral},
         function::Param,
+        stmt::RStatement,
         types::Type,
     },
     node_interner::{ExprId, FuncId, NodeInterner},
@@ -17,16 +18,16 @@ pub(crate) fn type_check_expression(
     errors: &mut Vec<TypeCheckError>,
 ) -> Type {
     let typ = match interner.expression(expr_id) {
-        HirExpression::Ident(ident_id) => {
+        RExpression::Ident(ident_id) => {
             // If an Ident is used in an expression, it cannot be a declaration statement
             match interner.ident_def(&ident_id) {
                 Some(ident_def_id) => interner.id_type(ident_def_id),
                 None => Type::Error,
             }
         }
-        HirExpression::Literal(literal) => {
+        RExpression::Literal(literal) => {
             match literal {
-                HirLiteral::Array(arr) => {
+                RLiteral::Array(arr) => {
                     // Type check the contents of the array
                     let elem_types = vecmap(&arr.contents, |arg| {
                         type_check_expression(interner, arg, errors)
@@ -65,17 +66,17 @@ pub(crate) fn type_check_expression(
 
                     arr_type
                 }
-                HirLiteral::Bool(_) => Type::Bool,
-                HirLiteral::Integer(_) => {
+                RLiteral::Bool(_) => Type::Bool,
+                RLiteral::Integer(_) => {
                     // Literal integers will always be a constant, since the lexer was able to parse the integer
                     Type::FieldElement(FieldElementType::Constant)
                 }
-                HirLiteral::Str(_) => unimplemented!(
+                RLiteral::Str(_) => unimplemented!(
                     "[Coming Soon] : Currently string literal types have not been implemented"
                 ),
             }
         }
-        HirExpression::Infix(infix_expr) => {
+        RExpression::Infix(infix_expr) => {
             // The type of the infix expression must be looked up from a type table
             let lhs_type = type_check_expression(interner, &infix_expr.lhs, errors);
             let rhs_type = type_check_expression(interner, &infix_expr.rhs, errors);
@@ -93,7 +94,7 @@ pub(crate) fn type_check_expression(
                 }
             }
         }
-        HirExpression::Index(index_expr) => {
+        RExpression::Index(index_expr) => {
             if let Some(ident_def) = interner.ident_def(&index_expr.collection_name) {
                 let index_type = type_check_expression(interner, &index_expr.index, errors);
                 if index_type != Type::CONSTANT && index_type != Type::Error {
@@ -123,13 +124,13 @@ pub(crate) fn type_check_expression(
                 Type::Error
             }
         }
-        HirExpression::Call(call_expr) => {
+        RExpression::Call(call_expr) => {
             let args = vecmap(&call_expr.arguments, |arg| {
                 type_check_expression(interner, arg, errors)
             });
             type_check_function_call(interner, expr_id, &call_expr.func_id, args, errors)
         }
-        HirExpression::MethodCall(method_call) => {
+        RExpression::MethodCall(method_call) => {
             let object_type = type_check_expression(interner, &method_call.object, errors);
             let method_name = method_call.method.0.contents.as_str();
             match lookup_method(interner, object_type.clone(), method_name, expr_id, errors) {
@@ -150,7 +151,7 @@ pub(crate) fn type_check_expression(
                 None => Type::Error,
             }
         }
-        HirExpression::Cast(cast_expr) => {
+        RExpression::Cast(cast_expr) => {
             // Evaluate the LHS
             let _lhs_type = type_check_expression(interner, &cast_expr.lhs, errors);
 
@@ -161,7 +162,7 @@ pub(crate) fn type_check_expression(
             // type_of(cast_expr) == type_of(cast_type)
             cast_expr.r#type
         }
-        HirExpression::For(for_expr) => {
+        RExpression::For(for_expr) => {
             let start_range_type = type_check_expression(interner, &for_expr.start_range, errors);
             let end_range_type = type_check_expression(interner, &for_expr.end_range, errors);
 
@@ -207,7 +208,7 @@ pub(crate) fn type_check_expression(
                 Box::new(last_type),
             )
         }
-        HirExpression::Block(block_expr) => {
+        RExpression::Block(block_expr) => {
             let mut block_type = Type::Unit;
 
             let statements = block_expr.statements();
@@ -217,7 +218,7 @@ pub(crate) fn type_check_expression(
                 if i + 1 < statements.len() {
                     if expr_type != Type::Unit && expr_type != Type::Error {
                         let id = match interner.statement(stmt) {
-                            crate::hir_def::stmt::HirStatement::Expression(expr) => expr,
+                            RStatement::Expression(expr) => expr,
                             _ => *expr_id,
                         };
 
@@ -234,17 +235,17 @@ pub(crate) fn type_check_expression(
 
             block_type
         }
-        HirExpression::Prefix(_) => {
+        RExpression::Prefix(_) => {
             // type_of(prefix_expr) == type_of(rhs_expression)
             todo!("prefix expressions have not been implemented yet")
         }
-        HirExpression::If(if_expr) => check_if_expr(&if_expr, expr_id, interner, errors),
-        HirExpression::Constructor(constructor) => {
+        RExpression::If(if_expr) => check_if_expr(&if_expr, expr_id, interner, errors),
+        RExpression::Constructor(constructor) => {
             check_constructor(&constructor, expr_id, interner, errors)
         }
-        HirExpression::MemberAccess(access) => check_member_access(access, interner, errors),
-        HirExpression::Error => Type::Error,
-        HirExpression::Tuple(elements) => Type::Tuple(vecmap(&elements, |elem| {
+        RExpression::MemberAccess(access) => check_member_access(access, interner, errors),
+        RExpression::Error => Type::Error,
+        RExpression::Tuple(elements) => Type::Tuple(vecmap(&elements, |elem| {
             type_check_expression(interner, elem, errors)
         })),
     };
@@ -335,7 +336,7 @@ fn type_check_function_call(
 // XXX: Review these rules. In particular, the interaction between integers, constants and private/public variables
 pub fn infix_operand_type_rules(
     lhs_type: &Type,
-    op: &HirBinaryOp,
+    op: &RBinaryOp,
     other: &Type,
 ) -> Result<Type, String> {
     if op.kind.is_comparator() {
@@ -389,7 +390,7 @@ pub fn infix_operand_type_rules(
 }
 
 fn check_if_expr(
-    if_expr: &expr::HirIfExpression,
+    if_expr: &expr::RIfExpression,
     expr_id: &ExprId,
     interner: &mut NodeInterner,
     errors: &mut Vec<TypeCheckError>,
@@ -435,7 +436,7 @@ fn check_if_expr(
 }
 
 fn check_constructor(
-    constructor: &expr::HirConstructorExpression,
+    constructor: &expr::RConstructorExpression,
     expr_id: &ExprId,
     interner: &mut NodeInterner,
     errors: &mut Vec<TypeCheckError>,
@@ -472,7 +473,7 @@ fn check_constructor(
 }
 
 pub fn check_member_access(
-    access: expr::HirMemberAccess,
+    access: expr::RMemberAccess,
     interner: &mut NodeInterner,
     errors: &mut Vec<TypeCheckError>,
 ) -> Type {

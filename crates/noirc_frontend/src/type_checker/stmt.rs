@@ -1,7 +1,7 @@
-use crate::hir_def::stmt::{
-    HirAssignStatement, HirConstrainStatement, HirLetStatement, HirPattern, HirStatement,
+use crate::ast_resolved::stmt::{
+    RAssignStatement, RConstrainStatement, RLetStatement, RPattern, RStatement,
 };
-use crate::hir_def::types::Type;
+use crate::ast_resolved::types::Type;
 use crate::node_interner::{ExprId, NodeInterner, StmtId};
 
 use super::{errors::TypeCheckError, expr::type_check_expression};
@@ -32,36 +32,36 @@ pub(crate) fn type_check(
         // does not use the interner to get the type. It returns Unit.
         //
         // The reason why we still modify the database, is to make sure it is future-proof
-        HirStatement::Expression(expr_id) => {
+        RStatement::Expression(expr_id) => {
             return type_check_expression(interner, &expr_id, errors);
         }
-        HirStatement::Semi(expr_id) => {
+        RStatement::Semi(expr_id) => {
             type_check_expression(interner, &expr_id, errors);
             interner.make_expr_type_unit(&expr_id);
         }
-        HirStatement::Let(let_stmt) => type_check_let_stmt(interner, let_stmt, errors),
-        HirStatement::Constrain(constrain_stmt) => {
+        RStatement::Let(let_stmt) => type_check_let_stmt(interner, let_stmt, errors),
+        RStatement::Constrain(constrain_stmt) => {
             type_check_constrain_stmt(interner, constrain_stmt, errors)
         }
-        HirStatement::Assign(assign_stmt) => type_check_assign_stmt(interner, assign_stmt, errors),
-        HirStatement::Error => (),
+        RStatement::Assign(assign_stmt) => type_check_assign_stmt(interner, assign_stmt, errors),
+        RStatement::Error => (),
     }
     Type::Unit
 }
 
 pub fn bind_pattern(
     interner: &mut NodeInterner,
-    pattern: &HirPattern,
+    pattern: &RPattern,
     typ: Type,
     errors: &mut Vec<TypeCheckError>,
 ) {
     match pattern {
-        HirPattern::Identifier(id) => interner.push_ident_type(id, typ),
-        HirPattern::Mutable(pattern, _) => bind_pattern(interner, pattern, typ, errors),
-        HirPattern::Tuple(_fields, _span) => {
+        RPattern::Identifier(id) => interner.push_ident_type(id, typ),
+        RPattern::Mutable(pattern, _) => bind_pattern(interner, pattern, typ, errors),
+        RPattern::Tuple(_fields, _span) => {
             todo!("Implement tuple types")
         }
-        HirPattern::Struct(struct_type, fields, span) => match typ {
+        RPattern::Struct(struct_type, fields, span) => match typ {
             Type::Struct(_, inner) if &inner == struct_type => {
                 let mut pattern_fields = fields.clone();
                 let mut type_fields = inner.borrow().fields.clone();
@@ -88,7 +88,7 @@ pub fn bind_pattern(
 
 fn type_check_assign_stmt(
     interner: &mut NodeInterner,
-    assign_stmt: HirAssignStatement,
+    assign_stmt: RAssignStatement,
     errors: &mut Vec<TypeCheckError>,
 ) {
     let expr_type = type_check_expression(interner, &assign_stmt.expression, errors);
@@ -110,7 +110,7 @@ fn type_check_assign_stmt(
 
 fn type_check_let_stmt(
     interner: &mut NodeInterner,
-    let_stmt: HirLetStatement,
+    let_stmt: RLetStatement,
     errors: &mut Vec<TypeCheckError>,
 ) {
     let resolved_type =
@@ -122,7 +122,7 @@ fn type_check_let_stmt(
 
 fn type_check_constrain_stmt(
     interner: &mut NodeInterner,
-    stmt: HirConstrainStatement,
+    stmt: RConstrainStatement,
     errors: &mut Vec<TypeCheckError>,
 ) {
     let lhs_type = type_check_expression(interner, &stmt.0.lhs, errors);

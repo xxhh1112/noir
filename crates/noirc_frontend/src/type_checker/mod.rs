@@ -10,7 +10,7 @@ use errors::TypeCheckError;
 use expr::type_check_expression;
 
 use crate::{
-    hir_def::types::Type,
+    ast_resolved::{function::RFunction, types::Type},
     node_interner::{FuncId, NodeInterner},
 };
 
@@ -18,43 +18,38 @@ use self::stmt::bind_pattern;
 
 /// Type checks a function and assigns the
 /// appropriate types to expressions in a side table
-pub fn type_check_func(interner: &mut NodeInterner, func_id: FuncId) -> Vec<TypeCheckError> {
+pub fn type_check_func(interner: &mut NodeInterner, function: RFunction) -> Vec<TypeCheckError> {
     // First fetch the metadata and add the types for parameters
     // Note that we do not look for the defining Identifier for a parameter,
     // since we know that it is the parameter itself
-    let meta = interner.function_meta(&func_id);
-    let declared_return_type = &meta.return_type;
-    let can_ignore_ret = meta.can_ignore_return_type();
-
+    let declared_return_type = &function.return_type;
     let mut errors = vec![];
-    for param in meta.parameters.into_iter() {
+    for param in function.parameters.into_iter() {
         bind_pattern(interner, &param.0, param.1, &mut errors);
     }
 
-    // Fetch the HirFunction and iterate all of it's statements
-    let hir_func = interner.function(&func_id);
-    let func_as_expr = hir_func.as_expr();
+    let func_span = function.name.span(); // XXX: We could be more specific and return the span of the last stmt, however stmts do not have spans yet
 
-    let function_last_type = type_check_expression(interner, func_as_expr, &mut errors);
+    if function.can_ignore_return_type() {
+        // Fetch the HirFunction and iterate all of it's statements
+        let body = function.body.unwrap();
+        let function_last_type = type_check_block(interner, body, &mut errors);
 
-    // Check declared return type and actual return type
-    if !can_ignore_ret
-        && (&function_last_type != declared_return_type)
-        && function_last_type != Type::Error
-    {
-        let func_span = interner.id_span(func_as_expr); // XXX: We could be more specific and return the span of the last stmt, however stmts do not have spans yet
-        errors.push(TypeCheckError::TypeMismatch {
-            expected_typ: declared_return_type.to_string(),
-            expr_typ: function_last_type.to_string(),
-            expr_span: func_span,
-        });
+        // Check declared return type and actual return type
+        if &function_last_type != declared_return_type && function_last_type != Type::Error {
+            errors.push(TypeCheckError::TypeMismatch {
+                expected_typ: declared_return_type.to_string(),
+                expr_typ: function_last_type.to_string(),
+                expr_span: func_span,
+            });
+        }
     }
 
     // Return type cannot be public
     if declared_return_type.is_public() {
         errors.push(TypeCheckError::PublicReturnType {
             typ: declared_return_type.clone(),
-            span: interner.id_span(func_as_expr),
+            span: func_span,
         });
     }
 
@@ -69,28 +64,36 @@ mod test {
 
     use noirc_errors::{Span, Spanned};
 
-    use crate::hir_def::stmt::HirLetStatement;
-    use crate::hir_def::stmt::HirPattern::Identifier;
-    use crate::hir_def::types::Type;
-    use crate::node_interner::{FuncId, NodeInterner};
-    use crate::{graph::CrateId, Ident};
+    use crate::ast_resolved::expr::RIdent;
+    use crate::ast_resolved::stmt::RLetStatement;
+    use crate::ast_resolved::stmt::RPattern::Identifier;
+    use crate::ast_resolved::types::Type;
+    use crate::node_interner::{FuncId, IdentId, NodeInterner};
     use crate::{
-        hir::{
-            def_map::{CrateDefMap, ModuleDefId},
-            resolution::{path_resolver::PathResolver, resolver::Resolver},
-        },
-        parse_program, FunctionKind, Path,
-    };
-    use crate::{
-        hir_def::{
-            expr::{
-                HirBinaryOp, HirBinaryOpKind, HirBlockExpression, HirExpression, HirInfixExpression,
-            },
-            function::{FuncMeta, HirFunction, Param},
-            stmt::HirStatement,
+        ast_resolved::{
+            expr::{BinaryOpKind, RBinaryOp, RBlockExpression, RExpression, RInfixExpression},
+            function::{Param, RFunction},
+            stmt::RStatement,
         },
         util::vecmap,
     };
+    use crate::{graph::CrateId, Ident};
+    use crate::{
+        parse_program,
+        resolver::{
+            def_map::{CrateDefMap, ModuleDefId},
+            resolution::{path_resolver::PathResolver, resolver::Resolver},
+        },
+        FunctionKind, Path,
+    };
+
+    fn ident(name: &str, id: u32) -> RIdent {
+        RIdent {
+            name: name.to_owned(),
+            span: Span::default(),
+            definition: IdentId(id),
+        }
+    }
 
     #[test]
     fn basic_let() {
@@ -98,67 +101,50 @@ mod test {
 
         // Add a simple let Statement into the interner
         // let z = x + y;
-        //
-        // Push x variable
-        let x_id = interner.push_ident(Spanned::from(Span::default(), String::from("x")).into());
-        interner.linked_ident_to_def(x_id, x_id);
-        // Push y variable
-        let y_id = interner.push_ident(Spanned::from(Span::default(), String::from("y")).into());
-        interner.linked_ident_to_def(y_id, y_id);
-        // Push z variable
-        let z_id = interner.push_ident(Spanned::from(Span::default(), String::from("z")).into());
-        interner.linked_ident_to_def(z_id, z_id);
-
-        // Push x and y as expressions
-        let x_expr_id = interner.push_expr(HirExpression::Ident(x_id));
-        let y_expr_id = interner.push_expr(HirExpression::Ident(y_id));
+        let x = ident("x", 0);
+        let y = ident("y", 1);
+        let x_expr = RExpression::Ident(x.clone());
+        let y_expr = RExpression::Ident(y.clone());
 
         // Create Infix
-        let operator = HirBinaryOp {
+        let operator = RBinaryOp {
             span: Span::default(),
-            kind: HirBinaryOpKind::Add,
+            kind: BinaryOpKind::Add,
         };
-        let expr = HirInfixExpression {
-            lhs: x_expr_id,
+        let expr = RExpression::Infix(RInfixExpression {
+            lhs: Box::new(x_expr),
             operator,
-            rhs: y_expr_id,
-        };
-        let expr_id = interner.push_expr(HirExpression::Infix(expr));
+            rhs: Box::new(y_expr),
+        });
 
         // Create let statement
-        let let_stmt = HirLetStatement {
-            pattern: Identifier(z_id),
+        let let_stmt = RLetStatement {
+            pattern: Identifier(ident("z", 2)),
             r#type: Type::Unspecified,
-            expression: expr_id,
+            expression: Box::new(expr),
         };
-        let stmt_id = interner.push_stmt(HirStatement::Let(let_stmt));
-        let expr_id = interner.push_expr(HirExpression::Block(HirBlockExpression(vec![stmt_id])));
+        let stmt_id = RStatement::Let(let_stmt);
+        let block = RBlockExpression(vec![stmt_id]);
 
         // Create function to enclose the let statement
-        let func = HirFunction::unsafe_from_expr(expr_id);
-        let func_id = interner.push_fn(func);
-
         let name = "test_func".to_owned();
         let fake_span = Span::single_char(0);
-        let name_id = interner.push_ident(Ident::from(Spanned::from(fake_span, name.clone())));
 
-        // Add function meta
-        let func_meta = FuncMeta {
-            name,
-            name_id,
+        let function = RFunction {
+            name: Spanned::from(fake_span, name).into(),
+            id: FuncId(3),
             kind: FunctionKind::Normal,
             attributes: None,
             parameters: vec![
-                Param(Identifier(x_id), Type::WITNESS),
-                Param(Identifier(y_id), Type::WITNESS),
+                Param(Identifier(x), Type::WITNESS),
+                Param(Identifier(y), Type::WITNESS),
             ]
             .into(),
             return_type: Type::Unit,
-            has_body: true,
+            body: Some(block),
         };
-        interner.push_fn_meta(func_meta, func_id);
 
-        let errors = super::type_check_func(&mut interner, func_id);
+        let errors = super::type_check_func(&mut interner, function);
         assert!(errors.is_empty());
     }
 
@@ -251,32 +237,25 @@ mod test {
         // the whole vec if the assert fails rather than just two booleans
         assert_eq!(errors, vec![]);
 
-        let mut func_ids = Vec::new();
-        for _ in 0..func_namespace.len() {
-            func_ids.push(interner.push_fn(HirFunction::empty()));
-        }
-
         let mut path_resolver = TestPathResolver(HashMap::new());
-        for (name, id) in func_namespace.into_iter().zip(func_ids.clone()) {
+        for (name, id) in func_namespace.into_iter().zip(func_namespace) {
+            let id = FuncId(interner.next_unique_id());
             path_resolver.insert_func(name, id);
         }
 
         let def_maps: HashMap<CrateId, CrateDefMap> = HashMap::new();
 
-        let func_meta = vecmap(program.functions, |nf| {
+        let functions = vecmap(program.functions, |nf| {
             let resolver = Resolver::new(&mut interner, &path_resolver, &def_maps);
-            let (hir_func, func_meta, resolver_errors) = resolver.resolve_function(nf);
+            let (function, resolver_errors) = resolver.resolve_function(nf);
             assert_eq!(resolver_errors, vec![]);
-            (hir_func, func_meta)
+            function
         });
 
-        for ((hir_func, meta), func_id) in func_meta.into_iter().zip(func_ids.clone()) {
-            interner.update_fn(func_id, hir_func);
-            interner.push_fn_meta(meta, func_id)
-        }
+        assert_eq!(functions.len(), 1);
 
         // Type check section
-        let errors = super::type_check_func(&mut interner, func_ids.first().cloned().unwrap());
+        let errors = super::type_check_func(&mut interner, functions[0]);
         assert_eq!(errors, vec![]);
     }
 }

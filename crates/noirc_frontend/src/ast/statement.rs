@@ -85,6 +85,10 @@ impl Ident {
         self.0.span()
     }
 
+    pub fn name(&self) -> &str {
+        &self.0.contents
+    }
+
     pub fn new(token: Token, span: Span) -> Ident {
         Ident::from(SpannedToken::new(token, span))
     }
@@ -246,18 +250,12 @@ impl Path {
         self.segments.len() == 1 && self.kind == PathKind::Plain
     }
 
-    pub fn as_ident(&self) -> Option<&Ident> {
+    pub fn into_ident(self) -> Option<Ident> {
         if !self.is_ident() {
             return None;
         }
-        self.segments.first()
-    }
-
-    pub fn to_ident(&self) -> Option<Ident> {
-        if !self.is_ident() {
-            return None;
-        }
-        self.segments.first().cloned()
+        // Pop should be fine here, is_ident already checks segments.len == 1
+        self.segments.pop()
     }
 
     pub fn as_string(&self) -> String {

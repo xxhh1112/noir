@@ -1,4 +1,4 @@
-use crate::{hir::resolution::import::ImportDirective, Ident};
+use crate::{resolver::resolution::import::ImportDirective, Ident};
 
 use noirc_errors::CustomDiagnostic as Diagnostic;
 use noirc_errors::DiagnosableError;

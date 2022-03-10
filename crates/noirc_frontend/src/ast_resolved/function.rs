@@ -1,59 +1,29 @@
 use noirc_abi::Abi;
 use noirc_errors::Span;
 
-use super::expr::{HirBlockExpression, HirExpression};
-use super::stmt::HirPattern;
-use crate::node_interner::{ExprId, IdentId, NodeInterner};
+use super::expr::{RBlockExpression, RIdent};
+use super::stmt::RPattern;
+use crate::node_interner::{FuncId, NodeInterner};
 use crate::util::vecmap;
-use crate::Type;
 use crate::{token::Attribute, FunctionKind};
-
-/// A Hir function is a block expression
-/// with a list of statements
-#[derive(Debug, Clone)]
-pub struct HirFunction(ExprId);
-
-impl HirFunction {
-    pub fn empty() -> HirFunction {
-        HirFunction(ExprId::empty_block_id())
-    }
-
-    // This function is marked as unsafe because
-    // the expression kind is not being checked
-    pub const fn unsafe_from_expr(expr_id: ExprId) -> HirFunction {
-        HirFunction(expr_id)
-    }
-
-    // This function is marked as unsafe because
-    // the expression kind is not being checked
-    pub const fn as_expr(&self) -> &ExprId {
-        &self.0
-    }
-
-    pub fn block(&self, interner: &NodeInterner) -> HirBlockExpression {
-        match interner.expression(&self.0) {
-            HirExpression::Block(block_expr) => block_expr,
-            _ => unreachable!("ice: functions can only be block expressions"),
-        }
-    }
-}
+use crate::{Ident, Type};
 
 /// An interned function parameter from a function definition
-#[derive(Debug, Clone)]
-pub struct Param(pub HirPattern, pub Type);
+#[derive(Debug)]
+pub struct Param(pub RPattern, pub Type);
 
 /// Attempts to retrieve the name of this parameter. Returns None
 /// if this parameter is a tuple or struct pattern.
-fn get_param_name(pattern: &HirPattern, interner: &NodeInterner) -> Option<String> {
+fn get_param_name(pattern: &RPattern, interner: &NodeInterner) -> Option<String> {
     match pattern {
-        HirPattern::Identifier(id) => Some(interner.ident_name(id)),
-        HirPattern::Mutable(pattern, _) => get_param_name(pattern, interner),
-        HirPattern::Tuple(_, _) => None,
-        HirPattern::Struct(_, _, _) => None,
+        RPattern::Identifier(ident) => Some(ident.name.to_owned()),
+        RPattern::Mutable(pattern, _) => get_param_name(pattern, interner),
+        RPattern::Tuple(_, _) => None,
+        RPattern::Struct(_, _, _) => None,
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Parameters(Vec<Param>);
 
 impl Parameters {
@@ -69,10 +39,10 @@ impl Parameters {
     pub fn span(&self, interner: &NodeInterner) -> Span {
         assert!(!self.is_empty());
         let mut spans = vecmap(&self.0, |param| match &param.0 {
-            HirPattern::Identifier(id) => interner.ident_span(id),
-            HirPattern::Mutable(_, span) => *span,
-            HirPattern::Tuple(_, span) => *span,
-            HirPattern::Struct(_, _, span) => *span,
+            RPattern::Identifier(ident) => ident.span,
+            RPattern::Mutable(_, span) => *span,
+            RPattern::Tuple(_, span) => *span,
+            RPattern::Struct(_, _, span) => *span,
         });
 
         let merged_span = spans.pop().unwrap();
@@ -109,10 +79,11 @@ impl From<Vec<Param>> for Parameters {
         Parameters(vec)
     }
 }
-#[derive(Debug, Clone)]
-pub struct FuncMeta {
-    pub name: String,
-    pub name_id: IdentId,
+
+#[derive(Debug)]
+pub struct RFunction {
+    pub name: Ident,
+    pub id: FuncId,
 
     pub kind: FunctionKind,
 
@@ -120,11 +91,10 @@ pub struct FuncMeta {
     pub parameters: Parameters,
     pub return_type: Type,
 
-    // This flag is needed for the attribute check pass
-    pub has_body: bool,
+    pub body: Option<RBlockExpression>,
 }
 
-impl FuncMeta {
+impl RFunction {
     /// Builtin and LowLevel functions usually have the return type
     /// declared, however their function bodies will be empty
     /// So this method tells the type checker to ignore the return

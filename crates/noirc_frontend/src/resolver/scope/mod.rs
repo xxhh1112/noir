@@ -45,12 +45,12 @@ impl<K: std::hash::Hash + Eq + Clone, V> Scope<K, V> {
         self.0.insert(key, value)
     }
 
-    /// Returns an iterator over all of the elements which satisfy the predicate
-    pub fn filter<F>(&self, pred: F) -> impl Iterator<Item = (&K, &V)>
+    /// Returns an iterator over all of the elements which satisfy the mapped function
+    pub fn filter_map<F, T>(self, pred: F) -> impl Iterator<Item = T>
     where
-        F: FnMut(&(&K, &V)) -> bool,
+        F: FnMut((K, V)) -> Option<T>,
     {
-        self.0.iter().filter(pred)
+        self.0.into_iter().filter_map(pred)
     }
 }
 

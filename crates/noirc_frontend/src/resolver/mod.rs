@@ -2,7 +2,6 @@ pub mod def_collector;
 pub mod def_map;
 pub mod resolution;
 pub mod scope;
-pub mod type_check;
 
 use crate::graph::{CrateGraph, CrateId};
 use crate::node_interner::NodeInterner;
