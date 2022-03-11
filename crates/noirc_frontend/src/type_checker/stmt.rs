@@ -2,16 +2,16 @@ use crate::ast_resolved::stmt::{
     RAssignStatement, RConstrainStatement, RLetStatement, RPattern, RStatement,
 };
 use crate::ast_resolved::types::Type;
-use crate::node_interner::{ExprId, NodeInterner, StmtId};
+use crate::node_interner::NodeInterner;
 
 use super::{errors::TypeCheckError, expr::type_check_expression};
 
 pub(crate) fn type_check(
     interner: &mut NodeInterner,
-    stmt_id: &StmtId,
+    statement: &RStatement,
     errors: &mut Vec<TypeCheckError>,
 ) -> Type {
-    match interner.statement(stmt_id) {
+    match statement {
         // Lets lay out a convincing argument that the handling of
         // SemiExpressions and Expressions below is correct.
         //

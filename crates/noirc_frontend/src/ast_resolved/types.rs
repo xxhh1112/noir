@@ -18,6 +18,10 @@ pub struct StructType {
     pub span: Span,
 }
 
+/// StructTypes are shared to provide shared access
+/// to methods and fields without cloning an Ast
+pub type StructTypeRef = Rc<RefCell<StructType>>;
+
 impl PartialEq for StructType {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -49,7 +53,7 @@ pub enum Type {
     Integer(FieldElementType, Signedness, u32),    // u32 = Integer(unsigned, 32)
     Bool,
     Unit,
-    Struct(FieldElementType, Rc<RefCell<StructType>>),
+    Struct(FieldElementType, StructTypeRef),
     Tuple(Vec<Type>),
 
     Error,
@@ -112,26 +116,28 @@ impl Type {
     // A feature of the language is that `Field` is like an
     // `Any` type which allows you to pass in any type which
     // is fundamentally a field element. E.g all integer types
-    pub fn is_super_type_of(&self, argument: &Type) -> bool {
+    pub fn is_subtype_of(&self, argument: &Type) -> bool {
         // Avoid reporting duplicate errors
         if self == &Type::Error || argument == &Type::Error {
             return true;
         }
 
-        // if `self` is a `Field` then it is a super type
-        // if the argument is a field element
-        if let Type::FieldElement(FieldElementType::Private) = self {
-            return argument.is_field_element();
+        // if `argument` is a `Field` then it is a super type
+        // if self is a field element
+        if let Type::FieldElement(FieldElementType::Private) = argument {
+            return self.is_field_element();
         }
 
         // For composite types, we need to check they are structurally the same
         // and then check that their base types are super types
+        // NOTE: Having covariant arrays like this requires they be immutable.
+        //       This is currently not the case
         if let (Type::Array(_, param_size, param_type), Type::Array(_, arg_size, arg_type)) =
             (self, argument)
         {
-            let is_super_type = param_type.is_super_type_of(arg_type);
-            let arity_check = param_size.is_a_super_type_of(arg_size);
-            return is_super_type && arity_check;
+            let is_subtype = param_type.is_subtype_of(arg_type);
+            let arity_check = param_size.is_subtype_of(arg_size);
+            return is_subtype && arity_check;
         }
 
         // XXX: Should we also allow functions that ask for u16

@@ -34,6 +34,10 @@ impl RExpression {
     pub const fn empty_block() -> RExpression {
         RExpression::Block(RBlockExpression(vec![]))
     }
+
+    pub fn span(&self) -> Span {
+        todo!()
+    }
 }
 
 #[derive(Debug)]
@@ -61,21 +65,6 @@ impl RIdent {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct RBinaryOp {
-    pub span: Span,
-    pub kind: BinaryOpKind,
-}
-
-impl From<BinaryOp> for RBinaryOp {
-    fn from(a: BinaryOp) -> RBinaryOp {
-        RBinaryOp {
-            span: a.span(),
-            kind: a.contents,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum RLiteral {
     Array(RArrayLiteral),
@@ -93,7 +82,7 @@ pub struct RPrefixExpression {
 #[derive(Debug)]
 pub struct RInfixExpression {
     pub lhs: Box<RExpression>,
-    pub operator: RBinaryOp,
+    pub operator: BinaryOp,
     pub rhs: Box<RExpression>,
 }
 

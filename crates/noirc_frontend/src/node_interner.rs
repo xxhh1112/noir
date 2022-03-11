@@ -6,14 +6,15 @@ use crate::ast_resolved::types::StructType;
 use crate::graph::CrateId;
 use crate::resolver::def_collector::dc_crate::UnresolvedStruct;
 use crate::resolver::def_map::{LocalModuleId, ModuleId};
+use crate::Type;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct IdentId(pub u32);
+pub struct IdentId(usize);
 
 impl IdentId {
     //dummy id for error reporting
     pub fn dummy_id() -> IdentId {
-        IdentId(std::u32::MAX)
+        IdentId(std::usize::MAX)
     }
 }
 
@@ -44,9 +45,12 @@ impl TypeId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NodeInterner {
     next_unique_id: u32,
+
+    /// Maps IdentId -> Definition
+    definitions: Vec<Definition>,
 
     // Struct map.
     //
@@ -56,13 +60,10 @@ pub struct NodeInterner {
     structs: HashMap<TypeId, Rc<RefCell<StructType>>>,
 }
 
-impl Default for NodeInterner {
-    fn default() -> Self {
-        NodeInterner {
-            next_unique_id: 0,
-            structs: HashMap::new(),
-        }
-    }
+#[derive(Debug, Clone)]
+struct Definition {
+    name: String,
+    typ: Type,
 }
 
 // XXX: Add check that insertions are not overwrites for maps
@@ -71,6 +72,23 @@ impl NodeInterner {
     pub fn next_unique_id(&mut self) -> u32 {
         self.next_unique_id += 1;
         self.next_unique_id
+    }
+
+    pub fn push_definition(&mut self, name: String) -> IdentId {
+        let len = self.definitions.len();
+        self.definitions.push(Definition {
+            name,
+            typ: Type::Unspecified,
+        });
+        IdentId(len)
+    }
+
+    pub fn get_definition_type_mut(&mut self, id: IdentId) -> &mut Type {
+        &mut self.definitions[id.0].typ
+    }
+
+    pub fn get_definition(&self, id: IdentId) -> &Definition {
+        &self.definitions[id.0]
     }
 
     pub fn push_empty_struct(&mut self, type_id: TypeId, typ: &UnresolvedStruct) {

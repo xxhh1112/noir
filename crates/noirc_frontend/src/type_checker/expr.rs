@@ -1,11 +1,14 @@
+use std::borrow::Borrow;
+
 use crate::{
     ast_resolved::{
-        expr::{self, RBinaryOp, RExpression, RLiteral},
+        expr::{self, RExpression, RInfixExpression, RLiteral},
         function::Param,
         stmt::RStatement,
         types::Type,
     },
-    node_interner::{ExprId, FuncId, NodeInterner},
+    ast_typed::expr::{TArrayLiteral, TExpression, TIdent, TInfixExpression, TLiteral},
+    node_interner::{FuncId, NodeInterner},
     util::vecmap,
     ArraySize, FieldElementType,
 };
@@ -14,26 +17,32 @@ use super::errors::TypeCheckError;
 
 pub(crate) fn type_check_expression(
     interner: &mut NodeInterner,
-    expr_id: &ExprId,
+    expr: RExpression,
     errors: &mut Vec<TypeCheckError>,
-) -> Type {
-    let typ = match interner.expression(expr_id) {
-        RExpression::Ident(ident_id) => {
+) -> TExpression {
+    match expr {
+        RExpression::Ident(ident) => {
             // If an Ident is used in an expression, it cannot be a declaration statement
-            match interner.ident_def(&ident_id) {
-                Some(ident_def_id) => interner.id_type(ident_def_id),
-                None => Type::Error,
-            }
+            let typ = interner.get_definition_type_mut(ident.definition);
+            TExpression::Ident(TIdent {
+                name: ident.name,
+                span: ident.span,
+                typ: typ.clone(),
+            })
         }
         RExpression::Literal(literal) => {
-            match literal {
+            TExpression::Literal(match literal {
                 RLiteral::Array(arr) => {
                     // Type check the contents of the array
-                    let elem_types = vecmap(&arr.contents, |arg| {
+                    let contents = vecmap(arr.contents, |arg| {
                         type_check_expression(interner, arg, errors)
                     });
 
-                    let first_elem_type = elem_types.get(0).cloned().unwrap_or(Type::Error);
+                    let first_elem_type = contents
+                        .get(0)
+                        .map(|elem| elem.get_type())
+                        .cloned()
+                        .unwrap_or(Type::Error);
 
                     // Specify the type of the Array
                     // Note: This assumes that the array is homogeneous, which will be checked next
@@ -41,20 +50,21 @@ pub(crate) fn type_check_expression(
                         // The FieldElement type is assumed to be private unless the user
                         // adds type annotations that say otherwise.
                         FieldElementType::Private,
-                        ArraySize::Fixed(elem_types.len() as u128),
+                        ArraySize::Fixed(contents.len() as u128),
                         Box::new(first_elem_type.clone()),
                     );
 
                     // Check if the array is homogeneous
                     if first_elem_type != Type::Error {
-                        for (index, elem_type) in elem_types.iter().enumerate().skip(1) {
+                        for (index, elem) in contents.iter().enumerate().skip(1) {
+                            let elem_type = elem.get_type();
                             if *elem_type != first_elem_type && elem_type != &Type::Error {
                                 errors.push(
                                     TypeCheckError::NonHomogeneousArray {
-                                        first_span: interner.expr_span(&arr.contents[0]),
+                                        first_span: arr.contents[0].span(),
                                         first_type: first_elem_type.to_string(),
                                         first_index: index,
-                                        second_span: interner.expr_span(&arr.contents[index]),
+                                        second_span: arr.contents[index].span(),
                                         second_type: elem_type.to_string(),
                                         second_index: index + 1,
                                     }
@@ -64,64 +74,73 @@ pub(crate) fn type_check_expression(
                         }
                     }
 
-                    arr_type
+                    let literal = TArrayLiteral {
+                        contents,
+                        length: arr.length,
+                    };
+                    TLiteral::Array(literal, arr_type)
                 }
-                RLiteral::Bool(_) => Type::Bool,
-                RLiteral::Integer(_) => {
+                RLiteral::Bool(b) => TLiteral::Bool(b, Type::Bool),
+                RLiteral::Integer(int) => {
                     // Literal integers will always be a constant, since the lexer was able to parse the integer
-                    Type::FieldElement(FieldElementType::Constant)
+                    TLiteral::Integer(int, Type::FieldElement(FieldElementType::Constant))
                 }
                 RLiteral::Str(_) => unimplemented!(
                     "[Coming Soon] : Currently string literal types have not been implemented"
                 ),
-            }
+            })
         }
         RExpression::Infix(infix_expr) => {
             // The type of the infix expression must be looked up from a type table
-            let lhs_type = type_check_expression(interner, &infix_expr.lhs, errors);
-            let rhs_type = type_check_expression(interner, &infix_expr.rhs, errors);
+            let lhs = type_check_expression(interner, *infix_expr.lhs, errors);
+            let rhs = type_check_expression(interner, *infix_expr.rhs, errors);
 
-            match infix_operand_type_rules(&lhs_type, &infix_expr.operator, &rhs_type) {
+            let typ = match infix_operand_type_rules(
+                lhs.get_type(),
+                &infix_expr.operator,
+                rhs.get_type(),
+            ) {
                 Ok(typ) => typ,
                 Err(msg) => {
-                    let lhs_span = interner.expr_span(&infix_expr.lhs);
-                    let rhs_span = interner.expr_span(&infix_expr.rhs);
                     errors.push(TypeCheckError::Unstructured {
                         msg,
-                        span: lhs_span.merge(rhs_span),
+                        span: infix_expr.lhs.span().merge(infix_expr.rhs.span()),
                     });
                     Type::Error
                 }
-            }
+            };
+
+            TExpression::Infix(TInfixExpression {
+                lhs: Box::new(lhs),
+                operator: infix_expr.operator,
+                rhs: Box::new(rhs),
+                typ,
+            })
         }
         RExpression::Index(index_expr) => {
-            if let Some(ident_def) = interner.ident_def(&index_expr.collection_name) {
-                let index_type = type_check_expression(interner, &index_expr.index, errors);
-                if index_type != Type::CONSTANT && index_type != Type::Error {
-                    let span = interner.id_span(&index_expr.index);
+            let index = type_check_expression(interner, *index_expr.index, errors);
+            if index.get_type().is_subtype_of(&Type::CONSTANT) {
+                let span = index_expr.index.span();
+                errors.push(TypeCheckError::TypeMismatch {
+                    expected_typ: "const Field".to_owned(),
+                    expr_typ: index_type.to_string(),
+                    expr_span: span,
+                });
+            }
+
+            match interner.id_type(&ident_def) {
+                // XXX: We can check the array bounds here also, but it may be better to constant fold first
+                // and have ConstId instead of ExprId for constants
+                Type::Array(_, _, base_type) => *base_type,
+                typ => {
+                    let span = interner.id_span(&index_expr.collection_name);
                     errors.push(TypeCheckError::TypeMismatch {
-                        expected_typ: "const Field".to_owned(),
-                        expr_typ: index_type.to_string(),
+                        expected_typ: "Array".to_owned(),
+                        expr_typ: typ.to_string(),
                         expr_span: span,
                     });
+                    Type::Error
                 }
-
-                match interner.id_type(&ident_def) {
-                    // XXX: We can check the array bounds here also, but it may be better to constant fold first
-                    // and have ConstId instead of ExprId for constants
-                    Type::Array(_, _, base_type) => *base_type,
-                    typ => {
-                        let span = interner.id_span(&index_expr.collection_name);
-                        errors.push(TypeCheckError::TypeMismatch {
-                            expected_typ: "Array".to_owned(),
-                            expr_typ: typ.to_string(),
-                            expr_span: span,
-                        });
-                        Type::Error
-                    }
-                }
-            } else {
-                Type::Error
             }
         }
         RExpression::Call(call_expr) => {
@@ -248,10 +267,7 @@ pub(crate) fn type_check_expression(
         RExpression::Tuple(elements) => Type::Tuple(vecmap(&elements, |elem| {
             type_check_expression(interner, elem, errors)
         })),
-    };
-
-    interner.push_expr_type(expr_id, typ.clone());
-    typ
+    }
 }
 
 fn lookup_method(
@@ -561,7 +577,6 @@ pub fn comparator_operand_type_rules(lhs_type: &Type, other: &Type) -> Result<Ty
 
 fn check_param_argument(
     interner: &NodeInterner,
-    expr_id: ExprId,
     param: &Param,
     arg_type: &Type,
     errors: &mut Vec<TypeCheckError>,
@@ -572,11 +587,11 @@ fn check_param_argument(
         unreachable!("arg type type cannot be a variable sized array. This is not supported.")
     }
 
-    if !param_type.is_super_type_of(arg_type) {
+    if !arg_type.is_subtype_of(param_type) {
         errors.push(TypeCheckError::TypeMismatch {
             expected_typ: param_type.to_string(),
             expr_typ: arg_type.to_string(),
-            expr_span: interner.expr_span(&expr_id),
+            expr_span: param.span(),
         });
     }
 }

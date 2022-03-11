@@ -1,40 +1,40 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::expr::{RExpression, RIdent, RInfixExpression};
+use super::expr::{TExpression, TIdent, TInfixExpression};
 use crate::{StructType, Type};
 use noirc_errors::Span;
 
 #[derive(Debug)]
-pub struct RLetStatement {
-    pub pattern: RPattern,
+pub struct TLetStatement {
+    pub pattern: TPattern,
     pub r#type: Type,
-    pub expression: Box<RExpression>,
+    pub expression: Box<TExpression>,
 }
 
 #[derive(Debug)]
-pub struct RAssignStatement {
-    pub identifier: RIdent,
-    pub expression: Box<RExpression>,
+pub struct TAssignStatement {
+    pub identifier: TIdent,
+    pub expression: Box<TExpression>,
 }
 
 #[derive(Debug)]
-pub struct RConstrainStatement(pub RInfixExpression);
+pub struct TConstrainStatement(pub TInfixExpression);
 
 #[derive(Debug)]
-pub enum RStatement {
-    Let(RLetStatement),
-    Constrain(RConstrainStatement),
-    Assign(RAssignStatement),
-    Expression(RExpression),
-    Semi(RExpression),
+pub enum TStatement {
+    Let(TLetStatement),
+    Constrain(TConstrainStatement),
+    Assign(TAssignStatement),
+    Expression(TExpression),
+    Semi(TExpression),
     Error,
 }
 
 #[derive(Debug)]
-pub enum RPattern {
-    Identifier(RIdent),
-    Mutable(Box<RPattern>, Span),
-    Tuple(Vec<RPattern>, Span),
-    Struct(Rc<RefCell<StructType>>, Vec<(RIdent, RPattern)>, Span),
+pub enum TPattern {
+    Identifier(TIdent),
+    Mutable(Box<TPattern>, Span),
+    Tuple(Vec<TPattern>, Span),
+    Struct(Rc<RefCell<StructType>>, Vec<(TIdent, TPattern)>, Span),
 }

@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod ast_resolved;
+pub mod ast_typed;
 pub mod graph;
 pub mod lexer;
 pub mod node_interner;
