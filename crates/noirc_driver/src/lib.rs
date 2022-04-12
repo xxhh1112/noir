@@ -1,6 +1,7 @@
 use acvm::acir::circuit::Circuit;
 use fm::FileType;
 use noirc_abi::Abi;
+use noirc_errors::CollectedErrors;
 use noirc_errors::DiagnosableError;
 use noirc_errors::Reporter;
 use noirc_evaluator::Evaluator;
@@ -122,16 +123,8 @@ impl Driver {
     /// Adds the standard library to the dep graph
     /// and statically analyses the local crate
     pub fn build(&mut self) {
-        self.add_std_lib();
-
-        self.analyse_crate()
-    }
-
-    fn analyse_crate(&mut self) {
-        let mut errs = vec![];
-        CrateDefMap::collect_defs(LOCAL_CRATE, &mut self.context, &mut errs);
         let mut error_count = 0;
-        for errors in &errs {
+        for errors in self.analyze_program() {
             error_count += errors.errors.len();
             Reporter::with_diagnostics(
                 errors.file_id.as_usize(),
@@ -141,6 +134,13 @@ impl Driver {
         }
 
         Reporter::finish(error_count);
+    }
+
+    pub fn analyze_program(&mut self) -> Vec<CollectedErrors> {
+        self.add_std_lib();
+        let mut errs = vec![];
+        CrateDefMap::collect_defs(LOCAL_CRATE, &mut self.context, &mut errs);
+        errs
     }
 
     pub fn compute_abi(&self) -> Option<Abi> {
