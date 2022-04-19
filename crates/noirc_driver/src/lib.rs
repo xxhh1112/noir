@@ -137,6 +137,8 @@ impl Driver {
     }
 
     pub fn analyze_program(&mut self) -> Vec<CollectedErrors> {
+        // TODO: Temporary
+        self.create_local_crate("src/main.nr", CrateType::Binary);
         self.add_std_lib();
         let mut errs = vec![];
         CrateDefMap::collect_defs(LOCAL_CRATE, &mut self.context, &mut errs);

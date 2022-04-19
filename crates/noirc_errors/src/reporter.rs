@@ -8,9 +8,9 @@ use std::io::Write;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CustomDiagnostic {
-    message: String,
-    secondaries: Vec<CustomLabel>,
-    notes: Vec<String>,
+    pub message: String,
+    pub secondaries: Vec<CustomLabel>,
+    pub notes: Vec<String>,
 }
 
 impl CustomDiagnostic {
@@ -60,7 +60,7 @@ impl std::fmt::Display for CustomDiagnostic {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct CustomLabel {
+pub struct CustomLabel {
     pub message: String,
     pub span: Span,
 }
