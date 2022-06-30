@@ -35,6 +35,8 @@ pub struct SSAFunction {
     pub name: String,
     pub arguments: Vec<NodeId>,
     pub result_types: Vec<ObjectType>,
+    //optim:
+    pub activate_cse: bool,
 }
 
 impl SSAFunction {
@@ -46,6 +48,7 @@ impl SSAFunction {
             arguments: Vec::new(),
             result_types: Vec::new(),
             idx,
+            activate_cse: false,
         }
     }
 
@@ -213,6 +216,12 @@ pub fn create_function(
     igen.context
         .new_instruction(node::Operation::Return(returned_values), node::ObjectType::NotAnObject);
     func.compile(igen); //unroll the function
+    func.activate_cse = true;
+    for i in &func.arguments {
+        if let ObjectType::Pointer(x) = igen.context.get_object_type(*i) {
+            func.activate_cse = false;
+        }
+    }
 
     igen.context.functions.insert(func_id, func);
     igen.context.current_block = current_block;
