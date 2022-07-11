@@ -568,6 +568,7 @@ impl StandardComposer {
         let p_proof = &mut proof_addr as *mut *mut u8;
         let g2_clone = self.crs.g2_data.clone();
         let witness_buf = witness.to_bytes();
+        dbg!(&witness_buf);
         let proof_size;
         unsafe {
             proof_size = barretenberg_wrapper::composer::create_proof(

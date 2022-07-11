@@ -9,5 +9,9 @@ edition = "2018"
 [dependencies]
 codespan-reporting = "0.9.5"
 codespan = "0.9.5"
-fm = {path = "../fm"}
+fm = { path = "../fm" }
 chumsky = { git = "https://github.com/jfecher/chumsky", rev = "ad9d312" }
+
+[features]
+default = []
+wasm = ["fm/wasm"]

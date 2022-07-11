@@ -1,0 +1,314 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.RollupProofData = exports.RollupProofDataOffsets = exports.RollupProofDataFields = void 0;
+const crypto_1 = require("crypto");
+const client_proofs_1 = require("../client_proofs");
+const serialize_1 = require("../serialize");
+const decode_inner_proof_1 = require("./decode_inner_proof");
+const encode_inner_proof_1 = require("./encode_inner_proof");
+const inner_proof_1 = require("./inner_proof");
+const _1 = require(".");
+const bigint_buffer_1 = require("../bigint_buffer");
+var RollupProofDataFields;
+(function (RollupProofDataFields) {
+    RollupProofDataFields[RollupProofDataFields["ROLLUP_ID"] = 0] = "ROLLUP_ID";
+    RollupProofDataFields[RollupProofDataFields["ROLLUP_SIZE"] = 1] = "ROLLUP_SIZE";
+    RollupProofDataFields[RollupProofDataFields["DATA_START_INDEX"] = 2] = "DATA_START_INDEX";
+    RollupProofDataFields[RollupProofDataFields["OLD_DATA_ROOT"] = 3] = "OLD_DATA_ROOT";
+    RollupProofDataFields[RollupProofDataFields["NEW_DATA_ROOT"] = 4] = "NEW_DATA_ROOT";
+    RollupProofDataFields[RollupProofDataFields["OLD_NULL_ROOT"] = 5] = "OLD_NULL_ROOT";
+    RollupProofDataFields[RollupProofDataFields["NEW_NULL_ROOT"] = 6] = "NEW_NULL_ROOT";
+    RollupProofDataFields[RollupProofDataFields["OLD_ROOT_ROOT"] = 7] = "OLD_ROOT_ROOT";
+    RollupProofDataFields[RollupProofDataFields["NEW_ROOT_ROOT"] = 8] = "NEW_ROOT_ROOT";
+    RollupProofDataFields[RollupProofDataFields["OLD_DEFI_ROOT"] = 9] = "OLD_DEFI_ROOT";
+    RollupProofDataFields[RollupProofDataFields["NEW_DEFI_ROOT"] = 10] = "NEW_DEFI_ROOT";
+})(RollupProofDataFields = exports.RollupProofDataFields || (exports.RollupProofDataFields = {}));
+var RollupProofDataOffsets;
+(function (RollupProofDataOffsets) {
+    RollupProofDataOffsets[RollupProofDataOffsets["ROLLUP_ID"] = 28] = "ROLLUP_ID";
+    RollupProofDataOffsets[RollupProofDataOffsets["ROLLUP_SIZE"] = 60] = "ROLLUP_SIZE";
+    RollupProofDataOffsets[RollupProofDataOffsets["DATA_START_INDEX"] = 92] = "DATA_START_INDEX";
+    RollupProofDataOffsets[RollupProofDataOffsets["OLD_DATA_ROOT"] = 96] = "OLD_DATA_ROOT";
+    RollupProofDataOffsets[RollupProofDataOffsets["NEW_DATA_ROOT"] = 128] = "NEW_DATA_ROOT";
+    RollupProofDataOffsets[RollupProofDataOffsets["OLD_NULL_ROOT"] = 160] = "OLD_NULL_ROOT";
+    RollupProofDataOffsets[RollupProofDataOffsets["NEW_NULL_ROOT"] = 192] = "NEW_NULL_ROOT";
+    RollupProofDataOffsets[RollupProofDataOffsets["OLD_ROOT_ROOT"] = 224] = "OLD_ROOT_ROOT";
+    RollupProofDataOffsets[RollupProofDataOffsets["NEW_ROOT_ROOT"] = 256] = "NEW_ROOT_ROOT";
+    RollupProofDataOffsets[RollupProofDataOffsets["OLD_DEFI_ROOT"] = 288] = "OLD_DEFI_ROOT";
+    RollupProofDataOffsets[RollupProofDataOffsets["NEW_DEFI_ROOT"] = 320] = "NEW_DEFI_ROOT";
+})(RollupProofDataOffsets = exports.RollupProofDataOffsets || (exports.RollupProofDataOffsets = {}));
+const parseHeaderInputs = (proofData) => {
+    const rollupId = RollupProofData.getRollupIdFromBuffer(proofData);
+    const rollupSize = proofData.readUInt32BE(RollupProofDataOffsets.ROLLUP_SIZE);
+    const dataStartIndex = proofData.readUInt32BE(RollupProofDataOffsets.DATA_START_INDEX);
+    const oldDataRoot = proofData.slice(RollupProofDataOffsets.OLD_DATA_ROOT, RollupProofDataOffsets.OLD_DATA_ROOT + 32);
+    const newDataRoot = proofData.slice(RollupProofDataOffsets.NEW_DATA_ROOT, RollupProofDataOffsets.NEW_DATA_ROOT + 32);
+    const oldNullRoot = proofData.slice(RollupProofDataOffsets.OLD_NULL_ROOT, RollupProofDataOffsets.OLD_NULL_ROOT + 32);
+    const newNullRoot = proofData.slice(RollupProofDataOffsets.NEW_NULL_ROOT, RollupProofDataOffsets.NEW_NULL_ROOT + 32);
+    const oldDataRootsRoot = proofData.slice(RollupProofDataOffsets.OLD_ROOT_ROOT, RollupProofDataOffsets.OLD_ROOT_ROOT + 32);
+    const newDataRootsRoot = proofData.slice(RollupProofDataOffsets.NEW_ROOT_ROOT, RollupProofDataOffsets.NEW_ROOT_ROOT + 32);
+    const oldDefiRoot = proofData.slice(RollupProofDataOffsets.OLD_DEFI_ROOT, RollupProofDataOffsets.OLD_DEFI_ROOT + 32);
+    const newDefiRoot = proofData.slice(RollupProofDataOffsets.NEW_DEFI_ROOT, RollupProofDataOffsets.NEW_DEFI_ROOT + 32);
+    let startIndex = 11 * 32;
+    const bridgeIds = [];
+    for (let i = 0; i < RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK; ++i) {
+        bridgeIds.push(proofData.slice(startIndex, startIndex + 32));
+        startIndex += 32;
+    }
+    const defiDepositSums = [];
+    for (let i = 0; i < RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK; ++i) {
+        defiDepositSums.push((0, bigint_buffer_1.toBigIntBE)(proofData.slice(startIndex, startIndex + 32)));
+        startIndex += 32;
+    }
+    const assetIds = [];
+    for (let i = 0; i < RollupProofData.NUMBER_OF_ASSETS; ++i) {
+        assetIds.push(proofData.readUInt32BE(startIndex + 28));
+        startIndex += 32;
+    }
+    const totalTxFees = [];
+    for (let i = 0; i < RollupProofData.NUMBER_OF_ASSETS; ++i) {
+        totalTxFees.push((0, bigint_buffer_1.toBigIntBE)(proofData.slice(startIndex, startIndex + 32)));
+        startIndex += 32;
+    }
+    const defiInteractionNotes = [];
+    for (let i = 0; i < RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK; ++i) {
+        defiInteractionNotes.push(proofData.slice(startIndex, startIndex + 32));
+        startIndex += 32;
+    }
+    const prevDefiInteractionHash = proofData.slice(startIndex, startIndex + 32);
+    startIndex += 32;
+    const rollupBeneficiary = proofData.slice(startIndex, startIndex + 32);
+    startIndex += 32;
+    const numRollupTxs = proofData.readUInt32BE(startIndex + 28);
+    startIndex += 32;
+    return {
+        rollupId,
+        rollupSize,
+        dataStartIndex,
+        oldDataRoot,
+        newDataRoot,
+        oldNullRoot,
+        newNullRoot,
+        oldDataRootsRoot,
+        newDataRootsRoot,
+        oldDefiRoot,
+        newDefiRoot,
+        bridgeIds,
+        defiDepositSums,
+        assetIds,
+        totalTxFees,
+        defiInteractionNotes,
+        prevDefiInteractionHash,
+        rollupBeneficiary,
+        numRollupTxs,
+    };
+};
+class RollupProofData {
+    constructor(rollupId, rollupSize, dataStartIndex, oldDataRoot, newDataRoot, oldNullRoot, newNullRoot, oldDataRootsRoot, newDataRootsRoot, oldDefiRoot, newDefiRoot, bridgeIds, defiDepositSums, assetIds, totalTxFees, defiInteractionNotes, prevDefiInteractionHash, rollupBeneficiary, numRollupTxs, innerProofData) {
+        this.rollupId = rollupId;
+        this.rollupSize = rollupSize;
+        this.dataStartIndex = dataStartIndex;
+        this.oldDataRoot = oldDataRoot;
+        this.newDataRoot = newDataRoot;
+        this.oldNullRoot = oldNullRoot;
+        this.newNullRoot = newNullRoot;
+        this.oldDataRootsRoot = oldDataRootsRoot;
+        this.newDataRootsRoot = newDataRootsRoot;
+        this.oldDefiRoot = oldDefiRoot;
+        this.newDefiRoot = newDefiRoot;
+        this.bridgeIds = bridgeIds;
+        this.defiDepositSums = defiDepositSums;
+        this.assetIds = assetIds;
+        this.totalTxFees = totalTxFees;
+        this.defiInteractionNotes = defiInteractionNotes;
+        this.prevDefiInteractionHash = prevDefiInteractionHash;
+        this.rollupBeneficiary = rollupBeneficiary;
+        this.numRollupTxs = numRollupTxs;
+        this.innerProofData = innerProofData;
+        if (bridgeIds.length !== RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK) {
+            throw new Error(`Expect bridgeIds to be an array of size ${RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK}.`);
+        }
+        if (defiDepositSums.length !== RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK) {
+            throw new Error(`Expect defiDepositSums to be an array of size ${RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK}.`);
+        }
+        if (totalTxFees.length !== RollupProofData.NUMBER_OF_ASSETS) {
+            throw new Error(`Expect totalTxFees to be an array of size ${RollupProofData.NUMBER_OF_ASSETS}.`);
+        }
+        if (defiInteractionNotes.length !== RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK) {
+            throw new Error(`Expect defiInteractionNotes to be an array of size ${RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK}.`);
+        }
+    }
+    get rollupHash() {
+        if (!this.rollupHash_) {
+            const allTxIds = this.innerProofData.map((innerProof) => innerProof.txId);
+            this.rollupHash_ = (0, crypto_1.createHash)("sha256")
+                .update(Buffer.concat(allTxIds))
+                .digest();
+        }
+        return this.rollupHash_;
+    }
+    toBuffer() {
+        return Buffer.concat([
+            (0, serialize_1.numToUInt32BE)(this.rollupId, 32),
+            (0, serialize_1.numToUInt32BE)(this.rollupSize, 32),
+            (0, serialize_1.numToUInt32BE)(this.dataStartIndex, 32),
+            this.oldDataRoot,
+            this.newDataRoot,
+            this.oldNullRoot,
+            this.newNullRoot,
+            this.oldDataRootsRoot,
+            this.newDataRootsRoot,
+            this.oldDefiRoot,
+            this.newDefiRoot,
+            ...this.bridgeIds,
+            ...this.defiDepositSums.map((v) => (0, bigint_buffer_1.toBufferBE)(v, 32)),
+            ...this.assetIds.map((a) => (0, serialize_1.numToUInt32BE)(a, 32)),
+            ...this.totalTxFees.map((a) => (0, bigint_buffer_1.toBufferBE)(a, 32)),
+            ...this.defiInteractionNotes,
+            this.prevDefiInteractionHash,
+            this.rollupBeneficiary,
+            (0, serialize_1.numToUInt32BE)(this.numRollupTxs, 32),
+            ...this.innerProofData.map((p) => p.toBuffer()),
+        ]);
+    }
+    getTotalDeposited(assetId) {
+        return this.innerProofData
+            .filter((p) => p.proofId === client_proofs_1.ProofId.DEPOSIT)
+            .map((p) => new _1.RollupDepositProofData(p))
+            .filter((p) => p.assetId == assetId)
+            .reduce((a, p) => a + p.publicValue, BigInt(0));
+    }
+    getTotalWithdrawn(assetId) {
+        return this.innerProofData
+            .filter((p) => p.proofId === client_proofs_1.ProofId.WITHDRAW)
+            .map((p) => new _1.RollupWithdrawProofData(p))
+            .filter((p) => p.assetId == assetId)
+            .reduce((a, p) => a + p.publicValue, BigInt(0));
+    }
+    getTotalDefiDeposit(assetId) {
+        const index = this.assetIds.indexOf(assetId);
+        return index < 0 ? BigInt(0) : this.defiDepositSums[index];
+    }
+    getTotalFees(assetId) {
+        const index = this.assetIds.indexOf(assetId);
+        return index < 0 ? BigInt(0) : this.totalTxFees[index];
+    }
+    encode() {
+        let lastNonEmptyIndex = 0;
+        this.innerProofData.forEach((p, i) => {
+            if (p.proofId !== client_proofs_1.ProofId.PADDING) {
+                lastNonEmptyIndex = i;
+            }
+        });
+        const numRealTxns = lastNonEmptyIndex + 1;
+        const encodedInnerProof = this.innerProofData
+            .filter((p, i) => i < numRealTxns)
+            .map((p) => (0, encode_inner_proof_1.encodeInnerProof)(p));
+        return Buffer.concat([
+            (0, serialize_1.numToUInt32BE)(this.rollupId, 32),
+            (0, serialize_1.numToUInt32BE)(this.rollupSize, 32),
+            (0, serialize_1.numToUInt32BE)(this.dataStartIndex, 32),
+            this.oldDataRoot,
+            this.newDataRoot,
+            this.oldNullRoot,
+            this.newNullRoot,
+            this.oldDataRootsRoot,
+            this.newDataRootsRoot,
+            this.oldDefiRoot,
+            this.newDefiRoot,
+            ...this.bridgeIds,
+            ...this.defiDepositSums.map((v) => (0, bigint_buffer_1.toBufferBE)(v, 32)),
+            ...this.assetIds.map((a) => (0, serialize_1.numToUInt32BE)(a, 32)),
+            ...this.totalTxFees.map((a) => (0, bigint_buffer_1.toBufferBE)(a, 32)),
+            ...this.defiInteractionNotes,
+            this.prevDefiInteractionHash,
+            this.rollupBeneficiary,
+            (0, serialize_1.numToUInt32BE)(this.numRollupTxs, 32),
+            (0, serialize_1.numToUInt32BE)(numRealTxns),
+            (0, serialize_1.numToUInt32BE)(Buffer.concat(encodedInnerProof).length),
+            ...encodedInnerProof,
+        ]);
+    }
+    static getRollupIdFromBuffer(proofData) {
+        return proofData.readUInt32BE(RollupProofDataOffsets.ROLLUP_ID);
+    }
+    static getRollupSizeFromBuffer(proofData) {
+        return proofData.readUInt32BE(RollupProofDataOffsets.ROLLUP_SIZE);
+    }
+    static getTxIdsFromBuffer(proofData) {
+        const rollupSize = RollupProofData.getRollupSizeFromBuffer(proofData);
+        const startIndex = RollupProofData.LENGTH_ROLLUP_HEADER_INPUTS;
+        return Array.from({ length: rollupSize })
+            .map((_, i) => {
+            const innerProofStart = startIndex + i * inner_proof_1.InnerProofData.LENGTH;
+            return (0, client_proofs_1.createTxId)(proofData.slice(innerProofStart, innerProofStart + inner_proof_1.InnerProofData.LENGTH));
+        })
+            .filter((id) => !id.equals(inner_proof_1.InnerProofData.PADDING.txId));
+    }
+    getNonPaddingProofs() {
+        return this.innerProofData.filter((proofData) => !proofData.isPadding());
+    }
+    getNonPaddingTxIds() {
+        return this.getNonPaddingProofs().map((proof) => proof.txId);
+    }
+    getNonPaddingProofIds() {
+        return this.getNonPaddingProofs().map((proof) => proof.proofId);
+    }
+    static fromBuffer(proofData) {
+        const { rollupId, rollupSize, dataStartIndex, oldDataRoot, newDataRoot, oldNullRoot, newNullRoot, oldDataRootsRoot, newDataRootsRoot, oldDefiRoot, newDefiRoot, bridgeIds, defiDepositSums, assetIds, totalTxFees, defiInteractionNotes, prevDefiInteractionHash, rollupBeneficiary, numRollupTxs, } = parseHeaderInputs(proofData);
+        if (!rollupSize) {
+            throw new Error("Empty rollup.");
+        }
+        let startIndex = RollupProofData.LENGTH_ROLLUP_HEADER_INPUTS;
+        const innerProofData = [];
+        for (let i = 0; i < rollupSize; ++i) {
+            const innerData = proofData.slice(startIndex, startIndex + inner_proof_1.InnerProofData.LENGTH);
+            innerProofData[i] = inner_proof_1.InnerProofData.fromBuffer(innerData);
+            startIndex += inner_proof_1.InnerProofData.LENGTH;
+        }
+        return new RollupProofData(rollupId, rollupSize, dataStartIndex, oldDataRoot, newDataRoot, oldNullRoot, newNullRoot, oldDataRootsRoot, newDataRootsRoot, oldDefiRoot, newDefiRoot, bridgeIds, defiDepositSums, assetIds, totalTxFees, defiInteractionNotes, prevDefiInteractionHash, rollupBeneficiary, numRollupTxs, innerProofData);
+    }
+    static randomData(rollupId, numTxs, dataStartIndex = 0, innerProofData, bridgeIds = []) {
+        const ipd = innerProofData === undefined
+            ? new Array(numTxs)
+                .fill(0)
+                .map(() => inner_proof_1.InnerProofData.fromBuffer(Buffer.alloc(inner_proof_1.InnerProofData.LENGTH)))
+            : innerProofData;
+        return new RollupProofData(rollupId, numTxs, dataStartIndex, Buffer.alloc(32), Buffer.alloc(32), Buffer.alloc(32), Buffer.alloc(32), Buffer.alloc(32), Buffer.alloc(32), Buffer.alloc(32), Buffer.alloc(32), bridgeIds
+            .map((b) => b.toBuffer())
+            .concat(new Array(RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK - bridgeIds.length)
+            .fill(0)
+            .map(() => Buffer.alloc(32))), new Array(RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK).fill(BigInt(0)), new Array(RollupProofData.NUMBER_OF_ASSETS).fill(0), new Array(RollupProofData.NUMBER_OF_ASSETS).fill(BigInt(0)), new Array(RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK)
+            .fill(0)
+            .map(() => Buffer.alloc(32)), Buffer.alloc(32), Buffer.alloc(32), ipd.length, ipd);
+    }
+    static decode(encoded) {
+        const { rollupId, rollupSize, dataStartIndex, oldDataRoot, newDataRoot, oldNullRoot, newNullRoot, oldDataRootsRoot, newDataRootsRoot, oldDefiRoot, newDefiRoot, bridgeIds, defiDepositSums, assetIds, totalTxFees, defiInteractionNotes, prevDefiInteractionHash, rollupBeneficiary, numRollupTxs, } = parseHeaderInputs(encoded);
+        if (!rollupSize) {
+            throw new Error("Empty rollup.");
+        }
+        let startIndex = RollupProofData.LENGTH_ROLLUP_HEADER_INPUTS;
+        startIndex += 4; // skip over numRealTxs
+        let innerProofDataLength = encoded.readUInt32BE(startIndex);
+        startIndex += 4;
+        const innerProofData = [];
+        while (innerProofDataLength > 0) {
+            const innerProof = (0, decode_inner_proof_1.decodeInnerProof)(encoded.slice(startIndex));
+            innerProofData.push(innerProof.proofData);
+            startIndex += innerProof.ENCODED_LENGTH;
+            innerProofDataLength -= innerProof.ENCODED_LENGTH;
+        }
+        for (let i = innerProofData.length; i < rollupSize; ++i) {
+            innerProofData.push(inner_proof_1.InnerProofData.PADDING);
+        }
+        return new RollupProofData(rollupId, rollupSize, dataStartIndex, oldDataRoot, newDataRoot, oldNullRoot, newNullRoot, oldDataRootsRoot, newDataRootsRoot, oldDefiRoot, newDefiRoot, bridgeIds, defiDepositSums, assetIds, totalTxFees, defiInteractionNotes, prevDefiInteractionHash, rollupBeneficiary, numRollupTxs, innerProofData);
+    }
+}
+exports.RollupProofData = RollupProofData;
+RollupProofData.NUMBER_OF_ASSETS = 16;
+RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK = 32;
+RollupProofData.NUM_ROLLUP_HEADER_INPUTS = 14 +
+    RollupProofData.NUMBER_OF_ASSETS * 2 +
+    RollupProofData.NUM_BRIDGE_CALLS_PER_BLOCK * 3;
+RollupProofData.LENGTH_ROLLUP_HEADER_INPUTS = RollupProofData.NUM_ROLLUP_HEADER_INPUTS * 32;
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoicm9sbHVwX3Byb29mX2RhdGEuanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi8uLi9zcmMvcm9sbHVwX3Byb29mL3JvbGx1cF9wcm9vZl9kYXRhLnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7OztBQUFBLG1DQUFvQztBQUNwQyxvREFBdUQ7QUFDdkQsNENBQTZDO0FBQzdDLDZEQUF3RDtBQUN4RCw2REFBd0Q7QUFDeEQsK0NBQStDO0FBQy9DLHdCQUFvRTtBQUNwRSxvREFBMEQ7QUFHMUQsSUFBWSxxQkFZWDtBQVpELFdBQVkscUJBQXFCO0lBQy9CLDJFQUFTLENBQUE7SUFDVCwrRUFBVyxDQUFBO0lBQ1gseUZBQWdCLENBQUE7SUFDaEIsbUZBQWEsQ0FBQTtJQUNiLG1GQUFhLENBQUE7SUFDYixtRkFBYSxDQUFBO0lBQ2IsbUZBQWEsQ0FBQTtJQUNiLG1GQUFhLENBQUE7SUFDYixtRkFBYSxDQUFBO0lBQ2IsbUZBQWEsQ0FBQTtJQUNiLG9GQUFhLENBQUE7QUFDZixDQUFDLEVBWlcscUJBQXFCLEdBQXJCLDZCQUFxQixLQUFyQiw2QkFBcUIsUUFZaEM7QUFFRCxJQUFZLHNCQVlYO0FBWkQsV0FBWSxzQkFBc0I7SUFDaEMsOEVBQXFELENBQUE7SUFDckQsa0ZBQXlELENBQUE7SUFDekQsNEZBQW1FLENBQUE7SUFDbkUsc0ZBQXdELENBQUE7SUFDeEQsdUZBQXdELENBQUE7SUFDeEQsdUZBQXdELENBQUE7SUFDeEQsdUZBQXdELENBQUE7SUFDeEQsdUZBQXdELENBQUE7SUFDeEQsdUZBQXdELENBQUE7SUFDeEQsdUZBQXdELENBQUE7SUFDeEQsdUZBQXdELENBQUE7QUFDMUQsQ0FBQyxFQVpXLHNCQUFzQixHQUF0Qiw4QkFBc0IsS0FBdEIsOEJBQXNCLFFBWWpDO0FBRUQsTUFBTSxpQkFBaUIsR0FBRyxDQUFDLFNBQWlCLEVBQUUsRUFBRTtJQUM5QyxNQUFNLFFBQVEsR0FBRyxlQUFlLENBQUMscUJBQXFCLENBQUMsU0FBUyxDQUFDLENBQUM7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

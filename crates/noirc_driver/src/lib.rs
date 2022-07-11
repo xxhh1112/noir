@@ -7,12 +7,15 @@ use noirc_evaluator::Evaluator;
 use noirc_frontend::graph::{CrateId, CrateName, CrateType, LOCAL_CRATE};
 use noirc_frontend::hir::def_map::CrateDefMap;
 use noirc_frontend::hir::Context;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct Driver {
     context: Context,
 }
+#[derive(Debug, Serialize, Deserialize)]
+
 pub struct CompiledProgram {
     pub circuit: Circuit,
     pub abi: Option<noirc_abi::Abi>,
@@ -25,7 +28,10 @@ impl Driver {
 
     // This is here for backwards compatibility
     // with the restricted version which only uses one file
-    pub fn compile_file(root_file: PathBuf, np_language: acvm::Language) -> CompiledProgram {
+    pub fn compile_file<P: AsRef<Path>>(
+        root_file: P,
+        np_language: acvm::Language,
+    ) -> CompiledProgram {
         let mut driver = Driver::new();
         driver.create_local_crate(root_file, CrateType::Binary);
         driver.into_compiled_program(np_language, false)
@@ -104,7 +110,16 @@ impl Driver {
     /// Adds the standard library to the dep graph
     /// and statically analyses the local crate
     pub fn build(&mut self) {
-        self.add_std_lib();
+        // This is clearly not right and is just here, as a reminder
+        // Won't pass code review.
+        const IS_WASM: bool = true;
+        if IS_WASM {
+            // We currently cannot locate the stdlib for WASM, as we do not
+            // have a dirs::config directory for wasm. We could have the user
+            // tell us where it is, or have them supply a config directory
+        } else {
+            self.add_std_lib();
+        }
 
         self.analyse_crate()
     }

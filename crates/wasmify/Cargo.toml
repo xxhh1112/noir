@@ -1,0 +1,36 @@
+[package]
+name = "wasmify"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasmer = { version = "*", features = [
+    "js",
+    "js-default",
+], default-features = false }
+# wasmer-compiler = "*"
+acvm = { path = "../acvm" }
+noir_field = { path = "../noir_field" }
+noirc_driver = { path = "../noirc_driver" }
+console_error_panic_hook = "*"
+wasm_pwg = { path = "../wasm_pwg" }
+# nargo = { path = "../nargo", default-features = false, features = [
+#   "dummy_backend",
+# ] }
+# nargo = { path = "../nargo", default-features = false, features = [
+#   "dummy_backend",
+# ] }
+wasm-bindgen = { version = "*" }
+getrandom = { version = "0.2.4", features = ["js"] }
+js-sys = "0.3.55"
+
+[dev-dependencies]
+wasm-bindgen-test = "*"
+
+[features]
+default = ["noirc_driver/wasm", "noir_field/bn254"]

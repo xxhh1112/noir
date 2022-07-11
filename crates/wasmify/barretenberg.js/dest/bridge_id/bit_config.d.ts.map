@@ -1,0 +1,1 @@
+{"version":3,"file":"bit_config.d.ts","sourceRoot":"","sources":["../../src/bridge_id/bit_config.ts"],"names":[],"mappings":"AAGA,qBAAa,SAAS;aAIF,gBAAgB,EAAE,OAAO;aACzB,iBAAiB,EAAE,OAAO;IAJ5C,MAAM,CAAC,KAAK,YAA+B;gBAGzB,gBAAgB,EAAE,OAAO,EACzB,iBAAiB,EAAE,OAAO;IAG5C,MAAM,CAAC,UAAU,CAAC,GAAG,EAAE,MAAM;IAO7B,QAAQ;CAMT"}

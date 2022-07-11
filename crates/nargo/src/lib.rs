@@ -16,6 +16,7 @@ mod errors;
 mod git;
 mod resolver;
 mod toml;
+pub mod wasm;
 
 /// Searches for the Nargo.toml file
 ///

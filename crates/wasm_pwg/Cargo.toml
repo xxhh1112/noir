@@ -1,0 +1,22 @@
+[package]
+name = "wasm_pwg"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+
+acvm = { path = "../acvm" }
+noir_field = { path = "../noir_field" }
+num-bigint = "0.4"
+num-traits = "0.2.8"
+
+# wasm-bindgen = { version = "*" }
+
+[dev-dependencies]
+
+
+[features]
+default = ["noir_field/bn254"]
