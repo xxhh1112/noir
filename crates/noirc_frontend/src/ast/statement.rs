@@ -216,6 +216,11 @@ impl Path {
         Path { segments: vec![segment], kind: PathKind::Plain }
     }
 
+    pub fn from_ident(ident: Ident) -> Path {
+        let span = ident.span();
+        Path::from_single(ident.0.contents, span)
+    }
+
     pub fn span(&self) -> Span {
         let mut segments = self.segments.iter();
         let first_segment = segments.next().expect("ice : cannot have an empty path");

@@ -230,8 +230,9 @@ mod test {
     }
 
     impl TestPathResolver {
-        pub fn insert_func(&mut self, name: String, func_id: FuncId) {
-            self.0.insert(name, func_id.into());
+        pub fn insert_func(&mut self, name: String, func_id: FuncId, interner: &mut NodeInterner) {
+            let def = interner.push_function_definition(name.clone(), func_id);
+            self.0.insert(name, ModuleDefId::VariableId(def));
         }
     }
 
@@ -252,7 +253,7 @@ mod test {
 
         let mut path_resolver = TestPathResolver(HashMap::new());
         for (name, id) in func_namespace.into_iter().zip(func_ids.clone()) {
-            path_resolver.insert_func(name, id);
+            path_resolver.insert_func(name, id, &mut interner);
         }
 
         let def_maps: HashMap<CrateId, CrateDefMap> = HashMap::new();

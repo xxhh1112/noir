@@ -659,7 +659,8 @@ where
             let pattern = Pattern::Identifier(name.into());
             let decl = Statement::new_let(((pattern, UnresolvedType::Unspecified), lhs));
 
-            let variable = Expression::new(ExpressionKind::Ident(name.into()), span);
+            let path = Path::from_single(name.into(), span);
+            let variable = Expression::new(ExpressionKind::Ident(path), span);
             let elems = repeat(variable).take(count as usize).collect();
             let array = ExpressionKind::array(elems);
             let array = Statement::Expression(Expression::new(array, span));

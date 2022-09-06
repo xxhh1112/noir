@@ -143,12 +143,6 @@ pub struct NodeInterner {
     /// to map callsite types back onto function parameter types, and undo this binding as needed.
     instantiation_bindings: HashMap<ExprId, TypeBindings>,
 
-    /// Temporary map needed to store the function type of Call expressions since we cannot store
-    /// it on a FuncId for every different call. This can be removed once call expressions can take
-    /// arbitrary expressions in the function position since it would then be stored on the
-    /// variable.
-    function_types: HashMap<ExprId, Type>,
-
     /// Remembers the field index a given HirMemberAccess expression was resolved to during type
     /// checking.
     field_indices: HashMap<ExprId, usize>,
@@ -183,7 +177,6 @@ impl Default for NodeInterner {
             id_to_type: HashMap::new(),
             structs: HashMap::new(),
             instantiation_bindings: HashMap::new(),
-            function_types: HashMap::new(),
             field_indices: HashMap::new(),
             next_type_variable_id: 0,
         };
@@ -307,16 +300,11 @@ impl NodeInterner {
         DefinitionId(id)
     }
 
-    pub fn push_function_definition(
-        &mut self,
-        name: String,
-        mutable: bool,
-        func: FuncId,
-    ) -> DefinitionId {
+    pub fn push_function_definition(&mut self, name: String, func: FuncId) -> DefinitionId {
         let id = self.definitions.len();
         self.definitions.push(DefinitionInfo {
             name,
-            mutable,
+            mutable: false,
             definition: Definition::Function(func),
         });
         DefinitionId(id)
@@ -434,14 +422,6 @@ impl NodeInterner {
 
     pub fn get_instantiation_bindings(&self, expr_id: ExprId) -> &TypeBindings {
         &self.instantiation_bindings[&expr_id]
-    }
-
-    pub fn function_type(&self, expr_id: ExprId) -> &Type {
-        &self.function_types[&expr_id]
-    }
-
-    pub fn set_function_type(&mut self, expr_id: ExprId, typ: Type) {
-        self.function_types.insert(expr_id, typ);
     }
 
     pub fn get_field_index(&self, expr_id: ExprId) -> usize {

@@ -128,20 +128,20 @@ pub struct HirMethodCallExpression {
 
 impl HirMethodCallExpression {
     pub fn into_function_call(
-        mut self,
+        &mut self,
         func: FuncId,
         func_name: &str,
         location: Location,
         interner: &mut NodeInterner,
-    ) -> HirExpression {
+    ) -> (ExprId, HirExpression) {
         let mut arguments = vec![self.object];
         arguments.append(&mut self.arguments);
 
-        let id = interner.push_function_definition(func_name.to_owned(), false, func);
+        let id = interner.push_function_definition(func_name.to_owned(), func);
         let ident = HirExpression::Ident(HirIdent { location, id });
         let func = interner.push_expr(ident);
 
-        HirExpression::Call(HirCallExpression { func, arguments })
+        (func, HirExpression::Call(HirCallExpression { func, arguments }))
     }
 }
 

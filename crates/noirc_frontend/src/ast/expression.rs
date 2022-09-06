@@ -122,6 +122,13 @@ impl PartialEq<Expression> for Expression {
     }
 }
 
+impl From<Ident> for Expression {
+    fn from(ident: Ident) -> Self {
+        let span = ident.span();
+        Expression::new(ExpressionKind::Ident(Path::from_ident(ident)), span)
+    }
+}
+
 impl Expression {
     pub fn new(kind: ExpressionKind, span: Span) -> Expression {
         Expression { kind, span }

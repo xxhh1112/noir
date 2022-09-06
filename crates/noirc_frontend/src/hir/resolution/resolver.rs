@@ -29,7 +29,7 @@ use crate::graph::CrateId;
 use crate::hir::def_map::{ModuleDefId, TryFromModuleDefId};
 use crate::hir_def::expr::HirExpression;
 use crate::hir_def::stmt::{HirAssignStatement, HirLValue, HirPattern};
-use crate::node_interner::{DefinitionId, ExprId, FuncId, NodeInterner, StmtId, StructId};
+use crate::node_interner::{DefinitionId, ExprId, NodeInterner, StmtId, StructId};
 use crate::util::vecmap;
 use crate::{
     hir::{def_map::CrateDefMap, resolution::path_resolver::PathResolver},
@@ -177,6 +177,15 @@ impl<'a> Resolver<'a> {
         ident
     }
 
+    fn issue_unexpected_def_id_kind_error(
+        &mut self,
+        expected: String,
+        got: ModuleDefId,
+        span: Span,
+    ) {
+        self.push_err(ResolverError::Expected { expected, got: got.as_str().to_owned(), span });
+    }
+
     // Checks for a variable having been declared before
     // variable declaration and definition cannot be separate in Noir
     // Once the variable has been found, intern and link `name` to this definition
@@ -186,25 +195,22 @@ impl<'a> Resolver<'a> {
     // is returned, for better error reporting UX
     fn find_variable(&mut self, path: Path) -> HirIdent {
         // TODO: Re-add 'num_times_used'
+        let span = path.span();
         let id = match self.resolve_path(path) {
-            Some(ModuleDefId::VariableId(func_id)) => todo!(),
-            Some(ModuleDefId::ModuleId(func_id)) => todo!(),
-            Some(ModuleDefId::TypeId(func_id)) => todo!(),
+            Some(ModuleDefId::VariableId(id)) => id,
+            Some(other_id) => {
+                self.issue_unexpected_def_id_kind_error("variable".into(), other_id, span);
+                DefinitionId::dummy_id()
+            }
             None => {
-                self.push_err(ResolverError::VariableNotDeclared {
-                    name: path.0.contents.clone(),
-                    span: path.0.span(),
-                });
-
+                self.push_err(ResolverError::VariableNotDeclared { path });
                 DefinitionId::dummy_id()
             }
         };
 
-        let location = Location::new(path.span(), self.file);
+        let location = Location::new(span, self.file);
         HirIdent { location, id }
     }
-
-    fn find_variable_in_scope(&mut self, scope: &mut ScopeTree, path: &[Ident]) -> HirIdent {}
 
     pub fn intern_function(&mut self, func: NoirFunction) -> (HirFunction, FuncMeta) {
         let func_meta = self.extract_meta(&func);
@@ -396,7 +402,7 @@ impl<'a> Resolver<'a> {
 
     fn resolve_lvalue(&mut self, lvalue: LValue) -> HirLValue {
         match lvalue {
-            LValue::Ident(ident) => HirLValue::Ident(self.find_variable(&ident)),
+            LValue::Ident(ident) => HirLValue::Ident(self.find_variable(Path::from_ident(ident))),
             LValue::MemberAccess { object, field_name } => {
                 let object = Box::new(self.resolve_lvalue(*object));
                 HirLValue::MemberAccess { object, field_name, field_index: None }
@@ -411,10 +417,8 @@ impl<'a> Resolver<'a> {
 
     pub fn resolve_expression(&mut self, expr: Expression) -> ExprId {
         let hir_expr = match expr.kind {
-            ExpressionKind::Ident(string) => {
-                let span = expr.span;
-                let ident = Spanned::from(span, string).into();
-                let ident_id = self.find_variable(&ident);
+            ExpressionKind::Ident(path) => {
+                let ident_id = self.find_variable(path);
                 HirExpression::Ident(ident_id)
             }
             ExpressionKind::Literal(literal) => HirExpression::Literal(match literal {
@@ -633,10 +637,6 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn lookup_function(&mut self, path: Path) -> FuncId {
-        self.lookup(path)
-    }
-
     fn lookup_type(&mut self, path: Path) -> StructId {
         let ident = path.as_ident();
         if ident.map_or(false, |i| i == "Self") {
@@ -715,7 +715,7 @@ mod test {
 
         let mut path_resolver = TestPathResolver(HashMap::new());
         for (name, id) in func_namespace.into_iter().zip(func_ids) {
-            path_resolver.insert_func(name.to_owned(), id);
+            path_resolver.insert_func(name.to_owned(), id, &mut interner);
         }
 
         let def_maps: HashMap<CrateId, CrateDefMap> = HashMap::new();
@@ -793,7 +793,7 @@ mod test {
 
         // It should be regarding the unresolved var `z` (Maybe change to undeclared and special case)
         match &errors[0] {
-            ResolverError::VariableNotDeclared { name, span: _ } => assert_eq!(name, "z"),
+            ResolverError::VariableNotDeclared { path } => assert_eq!(path.as_string(), "z"),
             _ => unimplemented!("we should only have an unresolved variable"),
         }
     }
@@ -847,8 +847,8 @@ mod test {
                 ResolverError::UnusedVariable { ident } => {
                     assert_eq!(&ident.0.contents, "z");
                 }
-                ResolverError::VariableNotDeclared { name, .. } => {
-                    assert_eq!(name, "a");
+                ResolverError::VariableNotDeclared { path } => {
+                    assert_eq!(path.as_string(), "a");
                 }
                 ResolverError::PathUnresolved { .. } => path_unresolved_error(err, "foo::bar"),
                 _ => unimplemented!(),
@@ -912,7 +912,7 @@ mod test {
             _def_maps: &HashMap<CrateId, CrateDefMap>,
             path: Path,
         ) -> Result<Option<ModuleDefId>, Ident> {
-            // Not here that foo::bar and hello::foo::bar would fetch the same thing
+            // Note that foo::bar and hello::foo::bar would fetch the same thing
             let name = path.segments.last().unwrap();
             let mod_def = self.0.get(&name.0.contents).cloned();
             match mod_def {
@@ -923,8 +923,9 @@ mod test {
     }
 
     impl TestPathResolver {
-        pub fn insert_func(&mut self, name: String, func_id: FuncId) {
-            self.0.insert(name, func_id.into());
+        pub fn insert_func(&mut self, name: String, func_id: FuncId, interner: &mut NodeInterner) {
+            let def = interner.push_function_definition(name.clone(), func_id);
+            self.0.insert(name, ModuleDefId::VariableId(def));
         }
     }
 }
