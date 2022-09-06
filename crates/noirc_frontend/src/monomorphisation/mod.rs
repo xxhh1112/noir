@@ -441,7 +441,7 @@ impl Monomorphiser {
     ) -> ast::Expression {
         let typ = self.interner.function_type(expr_id).follow_bindings();
         let arguments = vecmap(&call.arguments, |id| self.expr_infer(*id));
-        let func_id = call.func_id;
+        let func_id = call.func;
 
         let meta = self.interner.function_meta(&func_id);
         match meta.kind {

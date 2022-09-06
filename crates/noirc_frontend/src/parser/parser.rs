@@ -552,7 +552,10 @@ where
         ArrayIndex(Expression),
         Cast(UnresolvedType),
         MemberAccess((Ident, Option<Vec<Expression>>)),
+        Call(Vec<Expression>),
     }
+
+    let call_rhs = parenthesized(expression_list(expr_parser.clone())).map(UnaryRhs::Call);
 
     // `[expr]` in `arr[expr]`
     let array_rhs = expr_parser
@@ -571,12 +574,14 @@ where
         .map(UnaryRhs::MemberAccess)
         .labelled("field access");
 
-    let rhs = choice((array_rhs, cast_rhs, member_rhs));
+    // A function call is the most common operation of these, so it is checked first
+    let rhs = choice((call_rhs, array_rhs, cast_rhs, member_rhs));
 
     foldl_with_span(atom(expr_parser), rhs, |lhs, rhs, span| match rhs {
         UnaryRhs::ArrayIndex(index) => Expression::index(lhs, index, span),
         UnaryRhs::Cast(r#type) => Expression::cast(lhs, r#type, span),
         UnaryRhs::MemberAccess(field) => Expression::member_access_or_method_call(lhs, field, span),
+        UnaryRhs::Call(args) => Expression::function_call(lhs, args, span),
     })
 }
 
@@ -691,7 +696,6 @@ where
     P: ExprParser + 'a,
 {
     choice((
-        function_call(expr_parser.clone()),
         if_expr(expr_parser.clone()),
         for_expr(expr_parser.clone()),
         array_expr(expr_parser.clone()),
@@ -725,13 +729,6 @@ fn field_name() -> impl NoirParser<Ident> {
     }))
 }
 
-fn function_call<P>(expr_parser: P) -> impl NoirParser<ExpressionKind>
-where
-    P: ExprParser,
-{
-    path().then(parenthesized(expression_list(expr_parser))).map(ExpressionKind::function_call)
-}
-
 fn constructor<P>(expr_parser: P) -> impl NoirParser<ExpressionKind>
 where
     P: ExprParser,
@@ -755,7 +752,7 @@ where
 }
 
 fn variable() -> impl NoirParser<ExpressionKind> {
-    ident().map(|name| ExpressionKind::Ident(name.0.contents))
+    path().map(ExpressionKind::Ident)
 }
 
 fn literal() -> impl NoirParser<ExpressionKind> {
@@ -883,7 +880,7 @@ mod test {
     #[test]
     fn parse_function_call() {
         let valid = vec!["std::hash ()", " std::hash(x,y,a+b)", "crate::foo (x)", "hash (x,)"];
-        parse_all(function_call(expression()), valid);
+        parse_all(expression(), valid);
     }
 
     #[test]

@@ -160,6 +160,17 @@ pub struct NodeInterner {
 pub struct DefinitionInfo {
     pub name: String,
     pub mutable: bool,
+    pub definition: Definition,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Definition {
+    /// A local definition (e.g. a parameter or let binding) is one that is expected
+    /// to always be compiled in-order. ie. its references can never be found before its definition.
+    Local,
+
+    /// Functions can be referred to before they are defined.
+    Function(FuncId),
 }
 
 impl Default for NodeInterner {
@@ -292,8 +303,22 @@ impl NodeInterner {
 
     pub fn push_definition(&mut self, name: String, mutable: bool) -> DefinitionId {
         let id = self.definitions.len();
-        self.definitions.push(DefinitionInfo { name, mutable });
+        self.definitions.push(DefinitionInfo { name, mutable, definition: Definition::Local });
+        DefinitionId(id)
+    }
 
+    pub fn push_function_definition(
+        &mut self,
+        name: String,
+        mutable: bool,
+        func: FuncId,
+    ) -> DefinitionId {
+        let id = self.definitions.len();
+        self.definitions.push(DefinitionInfo {
+            name,
+            mutable,
+            definition: Definition::Function(func),
+        });
         DefinitionId(id)
     }
 

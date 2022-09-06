@@ -37,7 +37,7 @@ fn main() {
     for (name, (def_id, vis)) in module.scope.values() {
         println!("func name is {:?}", name);
         let func_id = match def_id {
-            ModuleDefId::FunctionId(func_id) => func_id,
+            ModuleDefId::VariableId(func_id) => func_id,
             _ => unreachable!(),
         };
 

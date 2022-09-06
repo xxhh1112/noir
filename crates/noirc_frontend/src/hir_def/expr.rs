@@ -2,7 +2,7 @@ use acvm::FieldElement;
 use fm::FileId;
 use noirc_errors::Location;
 
-use crate::node_interner::{DefinitionId, ExprId, FuncId, StmtId, StructId};
+use crate::node_interner::{DefinitionId, ExprId, FuncId, NodeInterner, StmtId, StructId};
 use crate::{BinaryOp, BinaryOpKind, Ident, Shared, UnaryOp};
 
 use super::types::{StructType, Type};
@@ -111,7 +111,7 @@ pub struct HirArrayLiteral {
 
 #[derive(Debug, Clone)]
 pub struct HirCallExpression {
-    pub func_id: FuncId,
+    pub func: ExprId,
     pub arguments: Vec<ExprId>,
 }
 
@@ -127,11 +127,21 @@ pub struct HirMethodCallExpression {
 }
 
 impl HirMethodCallExpression {
-    pub fn into_function_call(mut self, method_id: FuncId) -> HirExpression {
+    pub fn into_function_call(
+        mut self,
+        func: FuncId,
+        func_name: &str,
+        location: Location,
+        interner: &mut NodeInterner,
+    ) -> HirExpression {
         let mut arguments = vec![self.object];
         arguments.append(&mut self.arguments);
 
-        HirExpression::Call(HirCallExpression { func_id: method_id, arguments })
+        let id = interner.push_function_definition(func_name.to_owned(), false, func);
+        let ident = HirExpression::Ident(HirIdent { location, id });
+        let func = interner.push_expr(ident);
+
+        HirExpression::Call(HirCallExpression { func, arguments })
     }
 }
 

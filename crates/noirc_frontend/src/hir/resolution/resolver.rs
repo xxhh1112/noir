@@ -184,26 +184,27 @@ impl<'a> Resolver<'a> {
     //
     // If a variable is not found, then an error is logged and a dummy id
     // is returned, for better error reporting UX
-    fn find_variable(&mut self, name: &Ident) -> HirIdent {
-        // Find the definition for this Ident
-        let scope_tree = self.scopes.current_scope_tree();
-        let variable = scope_tree.find(&name.0.contents);
+    fn find_variable(&mut self, path: Path) -> HirIdent {
+        // TODO: Re-add 'num_times_used'
+        let id = match self.resolve_path(path) {
+            Some(ModuleDefId::VariableId(func_id)) => todo!(),
+            Some(ModuleDefId::ModuleId(func_id)) => todo!(),
+            Some(ModuleDefId::TypeId(func_id)) => todo!(),
+            None => {
+                self.push_err(ResolverError::VariableNotDeclared {
+                    name: path.0.contents.clone(),
+                    span: path.0.span(),
+                });
 
-        let id = if let Some(variable_found) = variable {
-            variable_found.num_times_used += 1;
-            variable_found.ident.id
-        } else {
-            self.push_err(ResolverError::VariableNotDeclared {
-                name: name.0.contents.clone(),
-                span: name.0.span(),
-            });
-
-            DefinitionId::dummy_id()
+                DefinitionId::dummy_id()
+            }
         };
 
-        let location = Location::new(name.span(), self.file);
+        let location = Location::new(path.span(), self.file);
         HirIdent { location, id }
     }
+
+    fn find_variable_in_scope(&mut self, scope: &mut ScopeTree, path: &[Ident]) -> HirIdent {}
 
     pub fn intern_function(&mut self, func: NoirFunction) -> (HirFunction, FuncMeta) {
         let func_meta = self.extract_meta(&func);
@@ -412,7 +413,7 @@ impl<'a> Resolver<'a> {
         let hir_expr = match expr.kind {
             ExpressionKind::Ident(string) => {
                 let span = expr.span;
-                let ident: Ident = Spanned::from(span, string).into();
+                let ident = Spanned::from(span, string).into();
                 let ident_id = self.find_variable(&ident);
                 HirExpression::Ident(ident_id)
             }
@@ -442,9 +443,9 @@ impl<'a> Resolver<'a> {
             }
             ExpressionKind::Call(call_expr) => {
                 // Get the span and name of path for error reporting
-                let func_id = self.lookup_function(call_expr.func_name);
+                let func = self.resolve_expression(call_expr.func);
                 let arguments = vecmap(call_expr.arguments, |arg| self.resolve_expression(arg));
-                HirExpression::Call(HirCallExpression { func_id, arguments })
+                HirExpression::Call(HirCallExpression { func, arguments })
             }
             ExpressionKind::MethodCall(call_expr) => {
                 let method = call_expr.method_name;
@@ -483,20 +484,6 @@ impl<'a> Resolver<'a> {
                 collection: self.resolve_expression(indexed_expr.collection),
                 index: self.resolve_expression(indexed_expr.index),
             }),
-            ExpressionKind::Path(path) => {
-                // If the Path is being used as an Expression, then it is referring to an Identifier
-                //
-                // This is currently not supported : const x = foo::bar::SOME_CONST + 10;
-                HirExpression::Ident(match path.as_ident() {
-                    Some(identifier) => self.find_variable(identifier),
-                    None => {
-                        self.push_err(ResolverError::PathIsNotIdent { span: path.span() });
-                        let id = DefinitionId::dummy_id();
-                        let location = Location::new(path.span(), self.file);
-                        HirIdent { id, location }
-                    }
-                })
-            }
             ExpressionKind::Block(block_expr) => self.resolve_block(block_expr),
             ExpressionKind::Constructor(constructor) => {
                 let span = constructor.type_name.span();

@@ -101,7 +101,7 @@ pub(crate) fn type_check_expression(
                 let typ = type_check_expression(interner, arg, errors);
                 (typ, interner.expr_span(arg))
             });
-            type_check_function_call(interner, expr_id, &call_expr.func_id, args, errors)
+            type_check_function_call(interner, expr_id, &call_expr.func, args, errors)
         }
         HirExpression::MethodCall(method_call) => {
             let object_type = type_check_expression(interner, &method_call.object, errors);

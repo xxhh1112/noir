@@ -49,7 +49,7 @@ impl ItemScope {
 
         match mod_def {
             ModuleDefId::ModuleId(_) => add_item(&mut self.types),
-            ModuleDefId::FunctionId(_) => add_item(&mut self.values),
+            ModuleDefId::VariableId(_) => add_item(&mut self.values),
             ModuleDefId::TypeId(_) => add_item(&mut self.types),
         }
     }
@@ -84,7 +84,7 @@ impl ItemScope {
     pub fn find_func_with_name(&self, func_name: &Ident) -> Option<FuncId> {
         let (module_def, _) = self.values.get(func_name)?;
         match module_def {
-            ModuleDefId::FunctionId(id) => Some(*id),
+            ModuleDefId::VariableId(id) => Some(*id),
             _ => None,
         }
     }

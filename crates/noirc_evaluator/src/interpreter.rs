@@ -472,13 +472,13 @@ impl<'a> Interpreter<'a> {
             }
             HirExpression::Call(call_expr) => {
 
-                let func_meta = self.context.def_interner.function_meta(&call_expr.func_id);
+                let func_meta = self.context.def_interner.function_meta(&call_expr.func);
                 //
                 // Choices are a low level func or an imported library function
                 // If low level, then we use it's func name to find out what function to call
                 // If not then we just call the library as usual with the function definition
                 match func_meta.kind {
-                    FunctionKind::Normal => self.call_function(env, &call_expr, call_expr.func_id),
+                    FunctionKind::Normal => self.call_function(env, &call_expr, call_expr.func),
                     FunctionKind::LowLevel => {
                         let attribute = func_meta.attributes.expect("all low level functions must contain an attribute which contains the opcode which it links to");
                         let opcode_name = attribute.foreign().expect("ice: function marked as foreign, but attribute kind does not match this");
