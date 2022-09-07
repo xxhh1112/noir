@@ -57,7 +57,7 @@ impl ResolverError {
                 diag.add_note("A new variable usually means a constraint has been added and is being unused. \n For this reason, it is almost always a bug to declare a variable and not use it.".to_owned());
                 diag
             }
-            ResolverError::VariableNotDeclared { path } => {
+            ResolverError::VariableNotDeclared { mut path } => {
                 let msg = if path.segments.len() > 1 {
                     let last = path.last_segment();
                     path.segments.pop();

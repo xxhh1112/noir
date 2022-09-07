@@ -25,7 +25,7 @@ pub struct IRGenerator {
 
     /// The current value of a variable. Used for flattening structs
     /// into multiple variables/values
-    variable_values: HashMap<DefinitionId, Value>,
+    variable_values: HashMap<LocalId, Value>,
 
     pub program: Functions,
 }
@@ -90,7 +90,7 @@ impl IRGenerator {
         Ok(())
     }
 
-    pub fn find_variable(&self, variable_def: DefinitionId) -> Option<&Value> {
+    pub fn find_variable(&self, variable_def: LocalId) -> Option<&Value> {
         self.variable_values.get(&variable_def)
     }
 
@@ -106,7 +106,7 @@ impl IRGenerator {
     pub fn abi_array(
         &mut self,
         name: &str,
-        ident_def: DefinitionId,
+        ident_def: LocalId,
         el_type: &noirc_abi::AbiType,
         len: u128,
         witness: Vec<acvm::acir::native_types::Witness>,
@@ -129,7 +129,7 @@ impl IRGenerator {
     pub fn abi_var(
         &mut self,
         name: &str,
-        ident_def: DefinitionId,
+        ident_def: LocalId,
         obj_type: node::ObjectType,
         witness: acvm::acir::native_types::Witness,
     ) {
@@ -151,7 +151,7 @@ impl IRGenerator {
     }
 
     fn codegen_identifier(&mut self, ident: &Ident) -> Value {
-        let value = self.variable_values[&ident.id].clone();
+        let value = self.variable_values[&ident.definition].clone();
         self.get_current_value(&value)
     }
 
@@ -200,9 +200,9 @@ impl IRGenerator {
         Ok((a_id, index))
     }
 
-    fn lvalue_ident_def(&self, lvalue: &LValue) -> DefinitionId {
+    fn lvalue_ident_def(&self, lvalue: &LValue) -> LocalId {
         match lvalue {
-            LValue::Ident(ident) => ident.id,
+            LValue::Ident(ident) => ident.definition,
             LValue::Index { array, .. } => self.lvalue_ident_def(array.as_ref()),
             LValue::MemberAccess { object, .. } => self.lvalue_ident_def(object.as_ref()),
         }
@@ -211,7 +211,7 @@ impl IRGenerator {
     pub fn create_new_variable(
         &mut self,
         var_name: String,
-        def: Option<DefinitionId>,
+        def: Option<LocalId>,
         obj_type: node::ObjectType,
         witness: Option<acvm::acir::native_types::Witness>,
     ) -> NodeId {
@@ -233,7 +233,7 @@ impl IRGenerator {
     }
 
     //Helper function for create_new_value()
-    fn insert_new_struct(&mut self, def: Option<DefinitionId>, values: Vec<Value>) -> Value {
+    fn insert_new_struct(&mut self, def: Option<LocalId>, values: Vec<Value>) -> Value {
         let result = Value::Tuple(values);
         if let Some(def_id) = def {
             self.variable_values.insert(def_id, result.clone());
@@ -241,12 +241,7 @@ impl IRGenerator {
         result
     }
 
-    pub fn create_new_value(
-        &mut self,
-        typ: &Type,
-        base_name: &str,
-        def: Option<DefinitionId>,
-    ) -> Value {
+    pub fn create_new_value(&mut self, typ: &Type, base_name: &str, def: Option<LocalId>) -> Value {
         match typ {
             Type::Tuple(fields) => {
                 let values = vecmap(fields.iter().enumerate(), |(i, field)| {
@@ -276,7 +271,7 @@ impl IRGenerator {
         name: &str,
         element_type: ObjectType,
         len: u32,
-        def_id: Option<DefinitionId>,
+        def_id: Option<LocalId>,
     ) -> NodeId {
         let id = self.context.new_array(name, element_type, len, def_id);
         if let Some(def) = def_id {
@@ -300,7 +295,7 @@ impl IRGenerator {
 
     /// Bind the given DefinitionId to the given Value. This will flatten the Value as needed,
     /// expanding each field of the value to a new variable.
-    fn bind_id(&mut self, id: DefinitionId, value: Value, name: &str) -> Result<(), RuntimeError> {
+    fn bind_id(&mut self, id: LocalId, value: Value, name: &str) -> Result<(), RuntimeError> {
         match value {
             Value::Single(node_id) => {
                 let otype = self.context.get_object_type(node_id);
@@ -343,7 +338,7 @@ impl IRGenerator {
     fn bind_variable(
         &mut self,
         variable_name: String,
-        definition_id: Option<DefinitionId>,
+        definition_id: Option<LocalId>,
         obj_type: node::ObjectType,
         value_id: NodeId,
     ) -> Result<Value, RuntimeError> {
@@ -493,7 +488,7 @@ impl IRGenerator {
                     other => todo!("Array indexing with an lhs of '{:?}' is unimplemented, you must use an expression in the form `identifier[expression]` for now.", other)
                 };
 
-                let arr_def = collection.id;
+                let arr_def = collection.definition;
                 let o_type = ObjectType::from(&collection.typ);
                 let e_type = o_type.deref(&self.context);
 

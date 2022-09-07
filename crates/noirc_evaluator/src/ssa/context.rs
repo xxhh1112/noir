@@ -13,7 +13,7 @@ use crate::ssa::function;
 use crate::ssa::node::{Mark, Node};
 use crate::Evaluator;
 use acvm::FieldElement;
-use noirc_frontend::monomorphisation::ast::{DefinitionId, FuncId};
+use noirc_frontend::monomorphisation::ast::{FuncId, LocalId};
 use noirc_frontend::util::vecmap;
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
@@ -549,7 +549,7 @@ impl SsaContext {
         name: &str,
         element_type: ObjectType,
         len: u32,
-        def_id: Option<DefinitionId>,
+        def_id: Option<LocalId>,
     ) -> NodeId {
         let array_index = self.mem.create_new_array(len, element_type, name);
         self.add_dummy_load(array_index);
@@ -573,7 +573,7 @@ impl SsaContext {
     pub fn create_array_from_object(
         &mut self,
         array: &crate::object::Array,
-        definition: DefinitionId,
+        definition: LocalId,
         el_type: node::ObjectType,
         arr_name: &str,
     ) -> NodeId {

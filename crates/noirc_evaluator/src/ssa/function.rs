@@ -4,7 +4,7 @@ use crate::environment::Environment;
 use crate::errors::RuntimeError;
 use acvm::acir::OPCODE;
 use acvm::FieldElement;
-use noirc_frontend::monomorphisation::ast::{self, Call, DefinitionId, FuncId, Type};
+use noirc_frontend::monomorphisation::ast::{self, Call, FuncId, LocalId, Type};
 
 use super::conditional::{AssumptionId, DecisionTree};
 use super::node::Node;
@@ -165,12 +165,7 @@ impl IRGenerator {
         Ok(())
     }
 
-    fn create_function_parameter(
-        &mut self,
-        id: DefinitionId,
-        typ: &Type,
-        name: &str,
-    ) -> Vec<NodeId> {
+    fn create_function_parameter(&mut self, id: LocalId, typ: &Type, name: &str) -> Vec<NodeId> {
         //check if the variable is already created:
         let val = match self.find_variable(id) {
             Some(var) => self.get_current_value(&var.clone()),

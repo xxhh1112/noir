@@ -2,7 +2,7 @@ use crate::environment::{Environment, FuncContext};
 use crate::errors::{RuntimeError, RuntimeErrorKind};
 use crate::object::{Array, Integer, Object, RangedObject};
 
-use crate::{binary_op, builtin, low_level_function_impl, Evaluator};
+use crate::{binary_op, Evaluator};
 use acvm::acir::circuit::gate::Gate;
 use acvm::acir::native_types::{Expression, Witness};
 
@@ -21,7 +21,7 @@ use noirc_frontend::{
     hir_def::{expr::HirIdent, stmt::HirLValue},
     node_interner::{ExprId, FuncId, StmtId},
 };
-use noirc_frontend::{BinaryOpKind, FunctionKind, Type};
+use noirc_frontend::{BinaryOpKind, Type};
 pub struct Interpreter<'a> {
     pub context: &'a Context,
     main_function: FuncId,
@@ -471,25 +471,25 @@ impl<'a> Interpreter<'a> {
                 arr.get(index_as_u128).map_err(|kind|kind.add_location(loc))
             }
             HirExpression::Call(call_expr) => {
-
-                let func_meta = self.context.def_interner.function_meta(&call_expr.func);
-                //
-                // Choices are a low level func or an imported library function
-                // If low level, then we use it's func name to find out what function to call
-                // If not then we just call the library as usual with the function definition
-                match func_meta.kind {
-                    FunctionKind::Normal => self.call_function(env, &call_expr, call_expr.func),
-                    FunctionKind::LowLevel => {
-                        let attribute = func_meta.attributes.expect("all low level functions must contain an attribute which contains the opcode which it links to");
-                        let opcode_name = attribute.foreign().expect("ice: function marked as foreign, but attribute kind does not match this");
-                        low_level_function_impl::call_low_level(self, env, &opcode_name, call_expr, loc)
-                    },
-                    FunctionKind::Builtin => {
-                        let attribute = func_meta.attributes.expect("all builtin functions must contain an attribute which contains the function name which it links to");
-                        let builtin_name = attribute.builtin().expect("ice: function marked as a builtin, but attribute kind does not match this");
-                        builtin::call_builtin(self, env, &builtin_name, call_expr, loc)
-                    },
-                }
+                todo!("Function calls are not implemented in the interpreter")
+                // let func_meta = self.context.def_interner.function_meta(&call_expr.func);
+                // //
+                // // Choices are a low level func or an imported library function
+                // // If low level, then we use it's func name to find out what function to call
+                // // If not then we just call the library as usual with the function definition
+                // match func_meta.kind {
+                //     FunctionKind::Normal => self.call_function(env, &call_expr, call_expr.func),
+                //     FunctionKind::LowLevel => {
+                //         let attribute = func_meta.attributes.expect("all low level functions must contain an attribute which contains the opcode which it links to");
+                //         let opcode_name = attribute.foreign().expect("ice: function marked as foreign, but attribute kind does not match this");
+                //         low_level_function_impl::call_low_level(self, env, &opcode_name, call_expr, loc)
+                //     },
+                //     FunctionKind::Builtin => {
+                //         let attribute = func_meta.attributes.expect("all builtin functions must contain an attribute which contains the function name which it links to");
+                //         let builtin_name = attribute.builtin().expect("ice: function marked as a builtin, but attribute kind does not match this");
+                //         builtin::call_builtin(self, env, &builtin_name, call_expr, loc)
+                //     },
+                // }
             }
             HirExpression::For(for_expr) => self.handle_for_expr(env,for_expr).map_err(|kind|kind.add_location(loc)),
             HirExpression::If(_) => todo!("If expressions are currently unimplemented"),

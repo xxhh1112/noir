@@ -196,7 +196,7 @@ impl<'a> Resolver<'a> {
     fn find_variable(&mut self, path: Path) -> HirIdent {
         // TODO: Re-add 'num_times_used'
         let span = path.span();
-        let id = match self.resolve_path(path) {
+        let id = match self.resolve_path(path.clone()) {
             Some(ModuleDefId::VariableId(id)) => id,
             Some(other_id) => {
                 self.issue_unexpected_def_id_kind_error("variable".into(), other_id, span);

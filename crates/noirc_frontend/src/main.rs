@@ -4,6 +4,7 @@ use fm::{FileManager, FileType};
 use hir::{def_map::CrateDefMap, Context};
 use noirc_frontend::graph::{CrateGraph, CrateType};
 use noirc_frontend::hir::{self, def_map::ModuleDefId};
+use noirc_frontend::node_interner::Definition;
 
 // XXX: This is another sandbox test
 fn main() {
@@ -37,12 +38,15 @@ fn main() {
     for (name, (def_id, vis)) in module.scope.values() {
         println!("func name is {:?}", name);
         let func_id = match def_id {
-            ModuleDefId::VariableId(func_id) => func_id,
+            ModuleDefId::VariableId(id) => match context.def_interner.definition(*id).definition {
+                Definition::Local => unreachable!(),
+                Definition::Function(id) => id,
+            },
             _ => unreachable!(),
         };
 
         // Get the HirFunction for that Id
-        let hir = context.def_interner.function(func_id);
+        let hir = context.def_interner.function(&func_id);
 
         println!("func hir is {:?}", hir);
         println!("func vis is {:?}", vis);

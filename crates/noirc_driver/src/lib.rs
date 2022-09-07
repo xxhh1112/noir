@@ -125,13 +125,10 @@ impl Driver {
 
     pub fn compute_abi(&self) -> Option<Abi> {
         let local_crate = self.context.def_map(LOCAL_CRATE).unwrap();
-
-        let main_function = local_crate.main_function()?;
+        let main_function = local_crate.main_function(&self.context.def_interner)?;
 
         let func_meta = self.context.def_interner.function_meta(&main_function);
-        let abi = func_meta.into_abi(&self.context.def_interner);
-
-        Some(abi)
+        Some(func_meta.into_abi(&self.context.def_interner))
     }
 
     pub fn into_compiled_program(
@@ -153,14 +150,16 @@ impl Driver {
         let local_crate = self.context.def_map(LOCAL_CRATE).unwrap();
 
         // All Binaries should have a main function
-        let main_function =
-            local_crate.main_function().expect("cannot compile a program with no main function");
+        let main_function = local_crate
+            .main_function(&self.context.def_interner)
+            .expect("cannot compile a program with no main function");
 
         // Create ABI for main function
         let func_meta = self.context.def_interner.function_meta(&main_function);
         let abi = func_meta.into_abi(&self.context.def_interner);
 
         let ast = monomorphise(main_function, self.context.def_interner);
+        println!("{}", ast);
 
         // Compile Program
         let circuit = match create_circuit(ast, np_language, show_ssa) {
