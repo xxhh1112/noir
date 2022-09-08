@@ -22,9 +22,8 @@ impl BuiltInCaller for SetPub {
 
         // This can only be called in the main context
         if env.func_context != FuncContext::Main {
-            let func_name =
-                evaluator.context.def_interner.function_name(&call_expr.func).to_owned();
-
+            // Can no longer retrieve function name, setpub should be deprecated anyway
+            let func_name = "(unknown)".into();
             return Err(
                 RuntimeErrorKind::FunctionNonMainContext { func_name }.add_location(location)
             );

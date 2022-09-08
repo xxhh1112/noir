@@ -13,7 +13,7 @@ use crate::ssa::function;
 use crate::ssa::node::{Mark, Node};
 use crate::Evaluator;
 use acvm::FieldElement;
-use noirc_frontend::monomorphisation::ast::{FuncId, LocalId};
+use noirc_frontend::monomorphisation::ast::{Definition, FuncId};
 use noirc_frontend::util::vecmap;
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
@@ -549,11 +549,14 @@ impl SsaContext {
         name: &str,
         element_type: ObjectType,
         len: u32,
-        def_id: Option<LocalId>,
+        def_id: Option<Definition>,
     ) -> NodeId {
         let array_index = self.mem.create_new_array(len, element_type, name);
         self.add_dummy_load(array_index);
         self.add_dummy_store(array_index);
+        if let Some(def) = def_id {
+            self.mem[array_index].def = def;
+        }
         //we create a variable pointing to this MemArray
         let new_var = node::Variable {
             id: NodeId::dummy(),
@@ -564,16 +567,13 @@ impl SsaContext {
             witness: None,
             parent_block: self.current_block,
         };
-        if let Some(def) = def_id {
-            self.mem[array_index].def = def;
-        }
         self.add_variable(new_var, None)
     }
 
     pub fn create_array_from_object(
         &mut self,
         array: &crate::object::Array,
-        definition: LocalId,
+        definition: Definition,
         el_type: node::ObjectType,
         arr_name: &str,
     ) -> NodeId {

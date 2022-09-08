@@ -2,7 +2,7 @@ use super::acir_gen::InternalVar;
 use super::context::SsaContext;
 use super::node::{self, Node, NodeId};
 use acvm::FieldElement;
-use noirc_frontend::monomorphisation::ast::LocalId;
+use noirc_frontend::monomorphisation::ast::{Definition, LocalId};
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ pub struct MemArray {
     pub element_type: node::ObjectType, //type of elements
     pub values: Vec<InternalVar>,
     pub name: String,
-    pub def: LocalId,
+    pub def: Definition,
     pub len: u32,     //number of elements
     pub adr: u32,     //base address of the array
     pub max: BigUint, //Max possible value of array elements
@@ -44,7 +44,7 @@ impl MemArray {
 
     fn new(
         id: ArrayId,
-        definition: LocalId,
+        definition: Definition,
         name: &str,
         of: node::ObjectType,
         len: u32,
@@ -68,8 +68,8 @@ impl MemArray {
 }
 
 impl Memory {
-    pub fn find_array(&self, definition: LocalId) -> Option<&MemArray> {
-        self.arrays.iter().find(|a| a.def == definition)
+    pub fn find_array(&self, definition: &Definition) -> Option<&MemArray> {
+        self.arrays.iter().find(|a| &a.def == definition)
     }
 
     /// Retrieves the ArrayId of the last array in Memory.
@@ -93,7 +93,7 @@ impl Memory {
         arr_name: &str,
     ) -> ArrayId {
         let id = ArrayId(self.arrays.len() as u32);
-        let dummy_id = LocalId(u32::MAX);
+        let dummy_id = Definition::Local(LocalId(u32::MAX));
         let mut new_array = MemArray::new(id, dummy_id, arr_name, el_type, len);
         new_array.adr = self.last_adr;
         self.arrays.push(new_array);

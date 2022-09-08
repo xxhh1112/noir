@@ -25,7 +25,7 @@ pub struct IRGenerator {
 
     /// The current value of a variable. Used for flattening structs
     /// into multiple variables/values
-    variable_values: HashMap<LocalId, Value>,
+    variable_values: HashMap<Definition, Value>,
 
     pub program: Functions,
 }
@@ -90,8 +90,8 @@ impl IRGenerator {
         Ok(())
     }
 
-    pub fn find_variable(&self, variable_def: LocalId) -> Option<&Value> {
-        self.variable_values.get(&variable_def)
+    pub fn find_variable(&self, variable_def: &Definition) -> Option<&Value> {
+        self.variable_values.get(variable_def)
     }
 
     pub fn get_current_value(&mut self, value: &Value) -> Value {
@@ -106,7 +106,7 @@ impl IRGenerator {
     pub fn abi_array(
         &mut self,
         name: &str,
-        ident_def: LocalId,
+        ident_def: Definition,
         el_type: &noirc_abi::AbiType,
         len: u128,
         witness: Vec<acvm::acir::native_types::Witness>,
@@ -129,7 +129,7 @@ impl IRGenerator {
     pub fn abi_var(
         &mut self,
         name: &str,
-        ident_def: LocalId,
+        ident_def: Definition,
         obj_type: node::ObjectType,
         witness: acvm::acir::native_types::Witness,
     ) {
@@ -139,7 +139,7 @@ impl IRGenerator {
             name: name.to_string(),
             obj_type,
             root: None,
-            def: Some(ident_def),
+            def: Some(ident_def.clone()),
             witness: Some(witness),
             parent_block: self.context.current_block,
         };
@@ -200,9 +200,9 @@ impl IRGenerator {
         Ok((a_id, index))
     }
 
-    fn lvalue_ident_def(&self, lvalue: &LValue) -> LocalId {
+    fn lvalue_ident_def(&self, lvalue: &LValue) -> &Definition {
         match lvalue {
-            LValue::Ident(ident) => ident.definition,
+            LValue::Ident(ident) => &ident.definition,
             LValue::Index { array, .. } => self.lvalue_ident_def(array.as_ref()),
             LValue::MemberAccess { object, .. } => self.lvalue_ident_def(object.as_ref()),
         }
@@ -211,7 +211,7 @@ impl IRGenerator {
     pub fn create_new_variable(
         &mut self,
         var_name: String,
-        def: Option<LocalId>,
+        def: Option<Definition>,
         obj_type: node::ObjectType,
         witness: Option<acvm::acir::native_types::Witness>,
     ) -> NodeId {
@@ -220,7 +220,7 @@ impl IRGenerator {
             obj_type,
             name: var_name,
             root: None,
-            def,
+            def: def.clone(),
             witness,
             parent_block: self.context.current_block,
         };
@@ -233,7 +233,7 @@ impl IRGenerator {
     }
 
     //Helper function for create_new_value()
-    fn insert_new_struct(&mut self, def: Option<LocalId>, values: Vec<Value>) -> Value {
+    fn insert_new_struct(&mut self, def: Option<Definition>, values: Vec<Value>) -> Value {
         let result = Value::Tuple(values);
         if let Some(def_id) = def {
             self.variable_values.insert(def_id, result.clone());
@@ -241,7 +241,12 @@ impl IRGenerator {
         result
     }
 
-    pub fn create_new_value(&mut self, typ: &Type, base_name: &str, def: Option<LocalId>) -> Value {
+    pub fn create_new_value(
+        &mut self,
+        typ: &Type,
+        base_name: &str,
+        def: Option<Definition>,
+    ) -> Value {
         match typ {
             Type::Tuple(fields) => {
                 let values = vecmap(fields.iter().enumerate(), |(i, field)| {
@@ -271,7 +276,7 @@ impl IRGenerator {
         name: &str,
         element_type: ObjectType,
         len: u32,
-        def_id: Option<LocalId>,
+        def_id: Option<Definition>,
     ) -> NodeId {
         let id = self.context.new_array(name, element_type, len, def_id);
         if let Some(def) = def_id {
@@ -295,7 +300,7 @@ impl IRGenerator {
 
     /// Bind the given DefinitionId to the given Value. This will flatten the Value as needed,
     /// expanding each field of the value to a new variable.
-    fn bind_id(&mut self, id: LocalId, value: Value, name: &str) -> Result<(), RuntimeError> {
+    fn bind_id(&mut self, id: Definition, value: Value, name: &str) -> Result<(), RuntimeError> {
         match value {
             Value::Single(node_id) => {
                 let otype = self.context.get_object_type(node_id);
@@ -338,7 +343,7 @@ impl IRGenerator {
     fn bind_variable(
         &mut self,
         variable_name: String,
-        definition_id: Option<LocalId>,
+        definition_id: Option<Definition>,
         obj_type: node::ObjectType,
         value_id: NodeId,
     ) -> Result<Value, RuntimeError> {
@@ -376,7 +381,7 @@ impl IRGenerator {
                 // and assign_pattern to use only fields of self instead of `self` itself.
                 let lhs = lhs.clone();
                 let result = self.assign_pattern(&lhs, rhs)?;
-                self.variable_values.insert(ident_def, result);
+                self.variable_values.insert(ident_def.clone(), result);
             }
             LValue::Index { array, index } => {
                 let (_, array_idx) = self.codegen_indexed_value(array.as_ref(), index, env)?;
@@ -422,7 +427,7 @@ impl IRGenerator {
         let_expr: &Let,
     ) -> Result<Value, RuntimeError> {
         let rhs = self.codegen_expression(env, &let_expr.expression)?;
-        self.bind_id(let_expr.id, rhs, &let_expr.name)?;
+        self.bind_id(Definition::Local(let_expr.id), rhs, &let_expr.name)?;
         Ok(Value::dummy())
     }
 
@@ -492,9 +497,9 @@ impl IRGenerator {
                 let o_type = ObjectType::from(&collection.typ);
                 let e_type = o_type.deref(&self.context);
 
-                let array = if let Some(array) = self.context.mem.find_array(arr_def) {
+                let array = if let Some(array) = self.context.mem.find_array(&arr_def) {
                     array
-                } else if let Some(Value::Single(pointer)) = self.find_variable(arr_def) {
+                } else if let Some(Value::Single(pointer)) = self.find_variable(&arr_def) {
                     match self.context.get_object_type(*pointer) {
                         ObjectType::Pointer(array_id) => &self.context.mem[array_id],
                         other => unreachable!("Expected Pointer type, found {:?}", other),
@@ -636,7 +641,7 @@ impl IRGenerator {
 
         //We support only const range for now
         //TODO how should we handle scope (cf. start/end_for_loop)?
-        let iter_def = for_expr.index_variable;
+        let iter_def = Definition::Local(for_expr.index_variable);
         let iter_type = ObjectType::from(&for_expr.index_type);
         let index_name = for_expr.index_name.clone();
 

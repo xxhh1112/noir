@@ -4,7 +4,8 @@ use crate::environment::Environment;
 use crate::errors::RuntimeError;
 use acvm::acir::OPCODE;
 use acvm::FieldElement;
-use noirc_frontend::monomorphisation::ast::{self, Call, FuncId, LocalId, Type};
+use noirc_frontend::monomorphisation::ast::{self, Call, Definition, FuncId, LocalId, Type};
+use noirc_frontend::util::try_vecmap;
 
 use super::conditional::{AssumptionId, DecisionTree};
 use super::node::Node;
@@ -167,7 +168,8 @@ impl IRGenerator {
 
     fn create_function_parameter(&mut self, id: LocalId, typ: &Type, name: &str) -> Vec<NodeId> {
         //check if the variable is already created:
-        let val = match self.find_variable(id) {
+        let id = Definition::Local(id);
+        let val = match self.find_variable(&id) {
             Some(var) => self.get_current_value(&var.clone()),
             None => self.create_new_value(typ, name, Some(id)),
         };
@@ -206,19 +208,14 @@ impl IRGenerator {
     pub fn call_low_level(
         &mut self,
         op: OPCODE,
-        call: &ast::CallLowLevel,
+        arguments: &[ast::Expression],
         env: &mut Environment,
     ) -> Result<NodeId, RuntimeError> {
         //Inputs
-        let mut args: Vec<NodeId> = Vec::new();
-
-        for arg in &call.arguments {
-            if let Ok(lhs) = self.codegen_expression(env, arg) {
-                args.push(lhs.unwrap_id()); //TODO handle multiple values
-            } else {
-                panic!("error calling {}", op);
-            }
-        }
+        let args = try_vecmap(arguments, |arg| {
+            //TODO handle multiple values
+            Ok(self.codegen_expression(env, arg)?.unwrap_id())
+        })?;
         //REM: we do not check that the nb of inputs correspond to the function signature, it is done in the frontend
 
         //Output:
