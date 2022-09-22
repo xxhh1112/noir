@@ -526,7 +526,7 @@ pub enum Operation {
     },
     //Call(function::FunctionCall),
     Call {
-        func_id: FuncId,
+        func: NodeId,
         arguments: Vec<NodeId>,
         returned_arrays: Vec<(super::mem::ArrayId, u32)>,
         predicate: conditional::AssumptionId,
@@ -1080,8 +1080,8 @@ impl Operation {
             }
             Intrinsic(i, args) => Intrinsic(*i, vecmap(args.iter().copied(), f)),
             Nop => Nop,
-            Call { func_id, arguments, returned_arrays, predicate } => Call {
-                func_id: *func_id,
+            Call { func: func_id, arguments, returned_arrays, predicate } => Call {
+                func: *func_id,
                 arguments: vecmap(arguments.iter().copied(), f),
                 returned_arrays: returned_arrays.clone(),
                 predicate: *predicate,
@@ -1199,7 +1199,7 @@ impl Operation {
             Operation::Jmp(_) => Opcode::Jmp,
             Operation::Phi { .. } => Opcode::Phi,
             Operation::Cond { .. } => Opcode::Cond,
-            Operation::Call { func_id, .. } => Opcode::Call(*func_id),
+            Operation::Call { func: func_id, .. } => Opcode::Call(*func_id),
             Operation::Return(_) => Opcode::Return,
             Operation::Result { .. } => Opcode::Results,
             Operation::Load { array_id, .. } => Opcode::Load(*array_id),

@@ -206,7 +206,7 @@ impl SsaContext {
             }
             Operation::Intrinsic(opcode, args) => format!("intrinsic {}({})", opcode, join(args)),
             Operation::Nop => "nop".into(),
-            Operation::Call { func_id, arguments, returned_arrays, .. } => {
+            Operation::Call { func: func_id, arguments, returned_arrays, .. } => {
                 format!("call {:?}({}) _ {:?}", func_id, join(arguments), returned_arrays)
             }
             Operation::Return(values) => format!("return ({})", join(values)),

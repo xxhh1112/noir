@@ -107,6 +107,7 @@ pub struct ArrayLiteral {
 pub struct Call {
     pub func: Box<Expression>,
     pub arguments: Vec<Expression>,
+    pub typ: Type,
 }
 
 #[derive(Debug, Clone)]

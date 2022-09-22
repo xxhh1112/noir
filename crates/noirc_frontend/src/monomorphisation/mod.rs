@@ -270,7 +270,7 @@ impl Monomorphiser {
                 ast::Expression::ExtractTupleField(expr, field_index)
             }
 
-            HirExpression::Call(call) => self.function_call(call),
+            HirExpression::Call(call) => self.function_call(call, expr),
 
             HirExpression::Cast(cast) => ast::Expression::Cast(ast::Cast {
                 lhs: Box::new(self.expr_infer(cast.lhs)),
@@ -491,12 +491,19 @@ impl Monomorphiser {
         }
     }
 
-    fn function_call(&mut self, call: HirCallExpression) -> ast::Expression {
+    fn function_call(
+        &mut self,
+        call: HirCallExpression,
+        id: node_interner::ExprId,
+    ) -> ast::Expression {
         let func = Box::new(self.expr_infer(call.func));
         let arguments = vecmap(&call.arguments, |id| self.expr_infer(*id));
 
+        let return_type = self.interner.id_type(id);
+        let typ = self.convert_type(&return_type);
+
         self.try_evaluate_call(&func, &call.arguments)
-            .unwrap_or_else(|| ast::Expression::Call(ast::Call { func, arguments }))
+            .unwrap_or_else(|| ast::Expression::Call(ast::Call { func, arguments, typ }))
     }
 
     /// Try to evaluate certain builtin functions (currently only 'arraylen')

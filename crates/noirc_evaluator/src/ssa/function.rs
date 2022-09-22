@@ -7,6 +7,7 @@ use acvm::FieldElement;
 use noirc_frontend::monomorphisation::ast::{self, Call, Definition, FuncId, LocalId, Type};
 use noirc_frontend::util::try_vecmap;
 
+use super::code_gen::Value;
 use super::conditional::{AssumptionId, DecisionTree};
 use super::node::Node;
 use super::{
@@ -177,21 +178,14 @@ impl IRGenerator {
     }
 
     //generates an instruction for calling the function
-    pub fn call(
-        &mut self,
-        call: &Call,
-        env: &mut Environment,
-    ) -> Result<Vec<NodeId>, RuntimeError> {
+    pub fn call(&mut self, call: &Call, env: &mut Environment) -> Result<Value, RuntimeError> {
+        let func = self.codegen_expression(env, &call.func)?.unwrap_id();
         let arguments = self.codegen_expression_list(env, &call.arguments);
-        let call_instruction = self.context.new_instruction(
-            node::Operation::Call {
-                func_id: call.func_id,
-                arguments,
-                returned_arrays: Vec::new(),
-                predicate: AssumptionId::dummy(),
-            },
-            ObjectType::NotAnObject,
-        )?;
+
+        let returned_arrays = vec![];
+        let predicate = AssumptionId::dummy();
+        let operation = node::Operation::Call { func, arguments, returned_arrays, predicate };
+        let call_instruction = self.context.new_instruction(operation, ObjectType::NotAnObject)?;
 
         let rtt = self.context.functions[&call.func_id].result_types.clone();
         let mut result = Vec::new();

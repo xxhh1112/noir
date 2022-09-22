@@ -517,28 +517,7 @@ impl IRGenerator {
                 let load = Operation::Load { array_id, index: index_as_obj };
                 Ok(Value::Single(self.context.new_instruction(load, e_type)?))
             }
-            Expression::Call(call_expr) => {
-                if self.context.get_ssafunc(call_expr.func_id).is_none() {
-                    let index = self.context.get_function_index();
-                    self.create_function(call_expr.func_id, env, index)?;
-                }
-
-                let callee = self.context.get_ssafunc(call_expr.func_id).unwrap().idx;
-                //generate a call instruction to the function cfg
-                if let Some(caller) = self.function_context {
-                    function::update_call_graph(&mut self.context.call_graph, caller, callee);
-                }
-                let results = self.call(call_expr, env)?;
-
-                let function = &self.program[call_expr.func_id];
-                Ok(match &function.return_type {
-                    Type::Tuple(_) => Value::Tuple(vecmap(results, Value::Single)),
-                    _ => {
-                        assert_eq!(results.len(), 1);
-                        Value::Single(results[0])
-                    }
-                })
-            }
+            Expression::Call(call_expr) => self.call(call_expr, env),
             Expression::CallLowLevel(call) => Ok(Value::Single(self.codegen_lowlevel(env, call)?)),
             Expression::CallBuiltin(_call) => {
                 todo!()

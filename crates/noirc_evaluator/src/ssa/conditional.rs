@@ -446,13 +446,17 @@ impl DecisionTree {
             }
 
             Operation::Call {
-                func_id, arguments, returned_arrays, predicate: ins_pred, ..
+                func: func_id,
+                arguments,
+                returned_arrays,
+                predicate: ins_pred,
+                ..
             } => {
                 if ctx.under_assumption(ass_value) {
                     assert!(*ins_pred == AssumptionId::dummy());
                     let mut ins2 = ctx.get_mut_instruction(ins_id);
                     ins2.operation = Operation::Call {
-                        func_id: *func_id,
+                        func: *func_id,
                         arguments: arguments.clone(),
                         returned_arrays: returned_arrays.clone(),
                         predicate,
@@ -503,12 +507,8 @@ impl DecisionTree {
                 let right_ins = ctx.get_instruction(*right_node.1);
                 match (&left_ins.operation, &right_ins.operation) {
                     (
-                        Operation::Call {
-                            func_id: left_func, returned_arrays: left_arrays, ..
-                        },
-                        Operation::Call {
-                            func_id: right_func, returned_arrays: right_arrays, ..
-                        },
+                        Operation::Call { func: left_func, returned_arrays: left_arrays, .. },
+                        Operation::Call { func: right_func, returned_arrays: right_arrays, .. },
                     ) if left_func == right_func
                         && left_arrays.is_empty()
                         && right_arrays.is_empty() =>
@@ -553,12 +553,12 @@ impl DecisionTree {
             let mut merged_op = match (&left_ins.operation, &right_ins.operation) {
                 (
                     Operation::Call {
-                        func_id: left_func,
+                        func: left_func,
                         arguments: left_arg,
                         returned_arrays: left_arrays,
                         ..
                     },
-                    Operation::Call { func_id: right_func, arguments: right_arg, .. },
+                    Operation::Call { func: right_func, arguments: right_arg, .. },
                 ) => {
                     debug_assert_eq!(left_func, right_func);
                     for a in left_arg.iter().enumerate() {
@@ -571,7 +571,7 @@ impl DecisionTree {
                         to_merge.push(Instruction::new(op, typ, Some(block_id)));
                     }
                     Operation::Call {
-                        func_id: *left_func,
+                        func: *left_func,
                         arguments: Vec::new(),
                         returned_arrays: left_arrays.clone(),
                         predicate: self.root,
