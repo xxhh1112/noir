@@ -288,7 +288,7 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 [[package]]
 name = "aztec_backend"
 version = "0.7.0"
-source = "git+https://github.com/noir-lang/aztec_backend?rev=63e6416c78128f2f42c2d6d708a289d885c0ba6c#63e6416c78128f2f42c2d6d708a289d885c0ba6c"
+source = "git+https://github.com/noir-lang/aztec_backend?rev=951c0d2b9b0c76aa7747f47602f9f5a5c399f7fd#951c0d2b9b0c76aa7747f47602f9f5a5c399f7fd"
 dependencies = [
  "acvm",
  "blake2",
