@@ -1,4 +1,4 @@
-use crate::node_interner::{DefinitionId, StructId};
+use crate::node_interner::{DefinitionId, StmtId, StructId};
 
 use super::ModuleId;
 
@@ -7,6 +7,7 @@ pub enum ModuleDefId {
     ModuleId(ModuleId),
     VariableId(DefinitionId),
     TypeId(StructId),
+    ConstId(StmtId),
 }
 
 impl ModuleDefId {
@@ -17,13 +18,19 @@ impl ModuleDefId {
         }
     }
 
-    // XXX: We are still allocating for error reporting even though strings are stored in binary
-    // It is a minor performance issue, which can be addressed by having the error reporting, not allocate
+    pub fn as_const(&self) -> Option<StmtId> {
+        match self {
+            ModuleDefId::ConstId(stmt_id) => Some(*stmt_id),
+            _ => None,
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             ModuleDefId::VariableId(_) => "variable",
             ModuleDefId::TypeId(_) => "type",
             ModuleDefId::ModuleId(_) => "module",
+            ModuleDefId::ConstId(_) => "const",
         }
     }
 }
@@ -31,6 +38,12 @@ impl ModuleDefId {
 impl From<ModuleId> for ModuleDefId {
     fn from(mid: ModuleId) -> Self {
         ModuleDefId::ModuleId(mid)
+    }
+}
+
+impl From<StmtId> for ModuleDefId {
+    fn from(stmt_id: StmtId) -> Self {
+        ModuleDefId::ConstId(stmt_id)
     }
 }
 
@@ -51,5 +64,19 @@ impl TryFromModuleDefId for StructId {
 
     fn description() -> String {
         "type".to_string()
+    }
+}
+
+impl TryFromModuleDefId for StmtId {
+    fn try_from(id: ModuleDefId) -> Option<Self> {
+        id.as_const()
+    }
+
+    fn dummy_id() -> Self {
+        StmtId::dummy_id()
+    }
+
+    fn description() -> String {
+        "const".to_string()
     }
 }

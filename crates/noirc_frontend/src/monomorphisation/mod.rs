@@ -4,14 +4,14 @@ use crate::{
     hir_def::{
         expr::*,
         function::Parameters,
-        stmt::{HirAssignStatement, HirLValue, HirPattern, HirStatement},
+        stmt::{HirAssignStatement, HirLValue, HirLetStatement, HirPattern, HirStatement},
     },
     node_interner::{self, NodeInterner, StmtId},
     util::vecmap,
     FunctionKind, IsConst, TypeBinding, TypeBindings,
 };
 
-use self::ast::{Definition, FuncId, Functions, LocalId};
+use self::ast::{Definition, FuncId, LocalId, Program};
 
 pub mod ast;
 pub mod printer;
@@ -34,7 +34,7 @@ struct Monomorphiser {
 
 type HirType = crate::Type;
 
-pub fn monomorphise(main: node_interner::FuncId, interner: NodeInterner) -> Functions {
+pub fn monomorphise(main: node_interner::FuncId, interner: NodeInterner) -> Program {
     let mut monomorphiser = Monomorphiser::new(interner);
     let mut functions = monomorphiser.compile_main(main);
 
@@ -43,7 +43,7 @@ pub fn monomorphise(main: node_interner::FuncId, interner: NodeInterner) -> Func
         monomorphiser.locals.clear();
 
         perform_instantiation_bindings(&bindings);
-        functions.push(monomorphiser.function(next_fn_id, new_id));
+        functions.push_function(monomorphiser.function(next_fn_id, new_id));
         undo_instantiation_bindings(bindings);
     }
 
@@ -74,22 +74,8 @@ impl Monomorphiser {
         ast::FuncId(id)
     }
 
-    fn lookup(
-        &mut self,
-        id: node_interner::DefinitionId,
-        expr_id: node_interner::ExprId,
-        typ: &HirType,
-    ) -> Option<Definition> {
-        match self.interner.definition(id).definition {
-            node_interner::Definition::Local => self.lookup_local(id),
-            node_interner::Definition::Function(func_id) => {
-                self.lookup_function(func_id, expr_id, typ)
-            }
-        }
-    }
-
-    fn lookup_local(&mut self, id: node_interner::DefinitionId) -> Option<Definition> {
-        self.locals.get(&id).copied().map(Definition::Local)
+    fn lookup_local(&mut self, id: node_interner::DefinitionId) -> Definition {
+        Definition::Local(self.locals[&id])
     }
 
     fn lookup_function(
@@ -97,10 +83,10 @@ impl Monomorphiser {
         id: node_interner::FuncId,
         expr_id: node_interner::ExprId,
         typ: &HirType,
-    ) -> Option<Definition> {
+    ) -> Definition {
         let typ = typ.follow_bindings();
         match self.globals.get(&id).and_then(|inner_map| inner_map.get(&typ)) {
-            Some(id) => Some(Definition::Function(*id)),
+            Some(id) => Definition::Function(*id),
             None => {
                 // Function has not been monomorphised yet
                 let meta = self.interner.function_meta(&id);
@@ -110,18 +96,18 @@ impl Monomorphiser {
                         let opcode = attribute.foreign().expect(
                             "ice: function marked as foreign, but attribute kind does not match this",
                         );
-                        Some(Definition::LowLevel(opcode))
+                        Definition::LowLevel(opcode)
                     }
                     FunctionKind::Builtin => {
                         let attribute = meta.attributes.expect("all low level functions must contain an attribute which contains the opcode which it links to");
                         let opcode = attribute.builtin().expect(
                             "ice: function marked as builtin, but attribute kind does not match this",
                         );
-                        Some(Definition::Builtin(opcode))
+                        Definition::Builtin(opcode)
                     }
                     FunctionKind::Normal => {
                         let id = self.queue_function(id, expr_id, typ);
-                        Some(Definition::Function(id))
+                        Definition::Function(id)
                     }
                 }
             }
@@ -132,25 +118,25 @@ impl Monomorphiser {
         self.locals.insert(id, new_id);
     }
 
-    fn define_function(&mut self, id: node_interner::FuncId, typ: HirType, new_id: FuncId) {
-        let typ = typ.follow_bindings();
+    /// Prerequisite: typ = typ.follow_bindings()
+    fn define_global(&mut self, id: node_interner::FuncId, typ: HirType, new_id: FuncId) {
         self.globals.entry(id).or_default().insert(typ, new_id);
     }
 
     /// The main function is special, we need to check for a return type and if present,
     /// insert an extra constrain on the return value.
-    fn compile_main(&mut self, main_id: node_interner::FuncId) -> Functions {
+    fn compile_main(&mut self, main_id: node_interner::FuncId) -> Program {
         let mut main = self.function(main_id, FuncId(0));
         let main_meta = self.interner.function_meta(&main_id);
 
         if main.return_type != ast::Type::Unit {
             let id = self.next_local_id();
 
-            main.parameters.push((id, main.return_type, "return".into()));
+            main.parameters.push((id, false, "return".into(), main.return_type));
             main.return_type = ast::Type::Unit;
 
             let name = "return".into();
-            let typ = self.convert_type(main_meta.return_type());
+            let typ = Self::convert_type(main_meta.return_type());
             let lhs = Box::new(ast::Expression::Ident(ast::Ident {
                 definition: Definition::Local(id),
                 location: None,
@@ -166,14 +152,14 @@ impl Monomorphiser {
         }
 
         let abi = main_meta.into_abi(&self.interner);
-        Functions::new(main, abi)
+        Program::new(main, abi)
     }
 
     fn function(&mut self, f: node_interner::FuncId, id: FuncId) -> ast::Function {
         let meta = self.interner.function_meta(&f);
         let name = self.interner.function_name(&f).to_owned();
 
-        let return_type = self.convert_type(meta.return_type());
+        let return_type = Self::convert_type(meta.return_type());
         let parameters = self.parameters(meta.parameters);
         let body = self.expr_infer(*self.interner.function(&f).as_expr());
 
@@ -182,7 +168,7 @@ impl Monomorphiser {
 
     /// Monomorphise each parameter, expanding tuple/struct patterns into multiple parameters
     /// and binding any generic types found.
-    fn parameters(&mut self, params: Parameters) -> Vec<(ast::LocalId, ast::Type, String)> {
+    fn parameters(&mut self, params: Parameters) -> Vec<(ast::LocalId, bool, String, ast::Type)> {
         let mut new_params = Vec::with_capacity(params.len());
         for parameter in params {
             self.parameter(parameter.0, &parameter.1, &mut new_params);
@@ -194,14 +180,15 @@ impl Monomorphiser {
         &mut self,
         param: HirPattern,
         typ: &HirType,
-        new_params: &mut Vec<(ast::LocalId, ast::Type, String)>,
+        new_params: &mut Vec<(ast::LocalId, bool, String, ast::Type)>,
     ) {
         match param {
             HirPattern::Identifier(ident) => {
                 //let value = self.expand_parameter(typ, new_params);
                 let new_id = self.next_local_id();
-                let name = self.interner.definition_name(ident.id).to_owned();
-                new_params.push((new_id, self.convert_type(typ), name));
+                let definition = self.interner.definition(ident.id);
+                let name = definition.name.clone();
+                new_params.push((new_id, definition.mutable, name, Self::convert_type(typ)));
                 self.define_local(ident.id, new_id);
             }
             HirPattern::Mutable(pattern, _) => self.parameter(*pattern, typ, new_params),
@@ -233,15 +220,15 @@ impl Monomorphiser {
         use ast::Literal::*;
 
         match self.interner.expression(&expr) {
-            HirExpression::Ident(ident) => ast::Expression::Ident(self.ident(ident, expr)),
+            HirExpression::Ident(ident) => self.ident(ident, expr),
             HirExpression::Literal(HirLiteral::Str(contents)) => Literal(Str(contents)),
             HirExpression::Literal(HirLiteral::Bool(value)) => Literal(Bool(value)),
             HirExpression::Literal(HirLiteral::Integer(value)) => {
-                let typ = self.convert_type(&self.interner.id_type(expr));
+                let typ = Self::convert_type(&self.interner.id_type(expr));
                 Literal(Integer(value, typ))
             }
             HirExpression::Literal(HirLiteral::Array(array)) => {
-                let element_type = self.convert_type(&self.interner.id_type(array.contents[0]));
+                let element_type = Self::convert_type(&self.interner.id_type(array.contents[0]));
                 let contents = vecmap(array.contents, |id| self.expr_infer(id));
                 Literal(Array(ast::ArrayLiteral { length: array.length, contents, element_type }))
             }
@@ -274,7 +261,7 @@ impl Monomorphiser {
 
             HirExpression::Cast(cast) => ast::Expression::Cast(ast::Cast {
                 lhs: Box::new(self.expr_infer(cast.lhs)),
-                r#type: self.convert_type(&cast.r#type),
+                r#type: Self::convert_type(&cast.r#type),
             }),
 
             HirExpression::For(for_expr) => {
@@ -288,7 +275,7 @@ impl Monomorphiser {
                 ast::Expression::For(ast::For {
                     index_variable,
                     index_name: self.interner.definition_name(for_expr.identifier.id).to_owned(),
-                    index_type: self.convert_type(&self.interner.id_type(for_expr.start_range)),
+                    index_type: Self::convert_type(&self.interner.id_type(for_expr.start_range)),
                     start_range: Box::new(start),
                     end_range: Box::new(end),
                     block,
@@ -318,10 +305,7 @@ impl Monomorphiser {
 
     fn statement(&mut self, id: StmtId) -> ast::Expression {
         match self.interner.statement(&id) {
-            HirStatement::Let(let_statement) => {
-                let expr = self.expr_infer(let_statement.expression);
-                self.unpack_pattern(let_statement.pattern, expr, &let_statement.r#type)
-            }
+            HirStatement::Let(let_statement) => self.let_statement(let_statement),
             HirStatement::Constrain(constrain) => {
                 let expr = self.expr(constrain.0, &HirType::Bool(IsConst::No(None)));
                 let location = self.interner.expr_location(&constrain.0);
@@ -332,6 +316,12 @@ impl Monomorphiser {
             HirStatement::Semi(expr) => ast::Expression::Semi(Box::new(self.expr_infer(expr))),
             HirStatement::Error => unreachable!(),
         }
+    }
+
+    fn let_statement(&mut self, let_statement: HirLetStatement) -> ast::Expression {
+        let expr = self.expr_infer(let_statement.expression);
+        let expected_type = self.interner.id_type(let_statement.expression);
+        self.unpack_pattern(let_statement.pattern, expr, &expected_type)
     }
 
     fn constructor(
@@ -350,7 +340,7 @@ impl Monomorphiser {
         for (field_name, expr_id) in constructor.fields {
             let new_id = self.next_local_id();
             let field_type = field_types.get(&field_name.0.contents).unwrap();
-            let typ = self.convert_type(field_type);
+            let typ = Self::convert_type(field_type);
 
             field_vars.insert(field_name.0.contents.clone(), (new_id, typ));
             let expression = Box::new(self.expr(expr_id, field_type));
@@ -422,7 +412,7 @@ impl Monomorphiser {
         })];
 
         for (i, (field_pattern, field_type)) in fields.into_iter().enumerate() {
-            let typ = self.convert_type(&field_type);
+            let typ = Self::convert_type(&field_type);
             let name = i.to_string();
             let new_rhs = ast::Expression::Ident(ast::Ident {
                 location: None,
@@ -438,17 +428,34 @@ impl Monomorphiser {
         ast::Expression::Block(definitions)
     }
 
-    fn ident(&mut self, ident: HirIdent, expr_id: node_interner::ExprId) -> ast::Ident {
-        let typ = self.interner.id_type(expr_id);
-        let definition = self.lookup(ident.id, expr_id, &typ).unwrap();
-
-        let typ = self.convert_type(&typ);
+    /// A local (ie non-global) ident only
+    fn local_ident(&mut self, ident: HirIdent) -> ast::Ident {
+        let definition = self.lookup_local(ident.id);
         let name = self.interner.definition_name(ident.id).to_owned();
+        let typ = Self::convert_type(&self.interner.id_type(ident.id));
         ast::Ident { location: Some(ident.location), definition, name, typ }
     }
 
+    fn ident(&mut self, ident: HirIdent, expr_id: node_interner::ExprId) -> ast::Expression {
+        let definition = match self.interner.definition(ident.id).definition {
+            node_interner::Definition::Local => self.lookup_local(ident.id),
+            node_interner::Definition::Function(func_id) => {
+                let typ = self.interner.id_type(expr_id);
+                self.lookup_function(func_id, expr_id, &typ)
+            }
+            node_interner::Definition::Const(expr_id) => {
+                // If it is not a predefined local, it must be a global that should be inlined
+                return self.expr_infer(expr_id);
+            }
+        };
+
+        let name = self.interner.definition_name(ident.id).to_owned();
+        let typ = Self::convert_type(&self.interner.id_type(ident.id));
+        ast::Expression::Ident(ast::Ident { location: Some(ident.location), definition, name, typ })
+    }
+
     /// Convert a non-tuple/struct type to a monomorphised type
-    fn convert_type(&self, typ: &HirType) -> ast::Type {
+    fn convert_type(typ: &HirType) -> ast::Type {
         match typ {
             HirType::FieldElement(_) => ast::Type::Field,
             HirType::Integer(_, sign, bits) => ast::Type::Integer(*sign, *bits),
@@ -457,7 +464,7 @@ impl Monomorphiser {
 
             HirType::Array(size, element) => {
                 let size = size.array_length().unwrap_or(0);
-                let element = self.convert_type(element.as_ref());
+                let element = Self::convert_type(element.as_ref());
                 ast::Type::Array(size, Box::new(element))
             }
 
@@ -465,9 +472,16 @@ impl Monomorphiser {
             | HirType::TypeVariable(binding)
             | HirType::NamedGeneric(binding, _) => {
                 if let TypeBinding::Bound(binding) = &*binding.borrow() {
-                    return self.convert_type(binding);
+                    return Self::convert_type(binding);
                 }
-                // Default any remaining unbound type variables to Field
+
+                // Default any remaining unbound type variables to Field.
+                // This should only happen if the variable in question is unused
+                // and within a larger generic type.
+                // NOTE: Make sure to review this if there is ever type-directed dispatch,
+                // like automatic solving of traits. It should be fine since it is strictly
+                // after type checking, but care should be taken that it doesn't change which
+                // impls are chosen.
                 *binding.borrow_mut() =
                     TypeBinding::Bound(HirType::FieldElement(IsConst::No(None)));
                 ast::Type::Field
@@ -475,16 +489,16 @@ impl Monomorphiser {
 
             HirType::Struct(def, args) => {
                 let fields = def.borrow().get_fields(args);
-                let fields = vecmap(fields, |(_, field)| self.convert_type(&field));
+                let fields = vecmap(fields, |(_, field)| Self::convert_type(&field));
                 ast::Type::Tuple(fields)
             }
 
             HirType::Tuple(fields) => {
-                let fields = vecmap(fields, |field| self.convert_type(field));
+                let fields = vecmap(fields, Self::convert_type);
                 ast::Type::Tuple(fields)
             }
 
-            HirType::Function(_, _, _)
+            HirType::Function(_, _)
             | HirType::Forall(_, _)
             | HirType::ArrayLength(_)
             | HirType::Error => unreachable!("Unexpected type {} found", typ),
@@ -498,9 +512,8 @@ impl Monomorphiser {
     ) -> ast::Expression {
         let func = Box::new(self.expr_infer(call.func));
         let arguments = vecmap(&call.arguments, |id| self.expr_infer(*id));
-
         let return_type = self.interner.id_type(id);
-        let typ = self.convert_type(&return_type);
+        let typ = Self::convert_type(&return_type);
 
         self.try_evaluate_call(&func, &call.arguments)
             .unwrap_or_else(|| ast::Expression::Call(ast::Call { func, arguments, typ }))
@@ -540,7 +553,7 @@ impl Monomorphiser {
         function_type: HirType,
     ) -> FuncId {
         let new_id = self.next_function_id();
-        self.define_function(id, function_type, new_id);
+        self.define_global(id, function_type, new_id);
 
         let bindings = self.interner.get_instantiation_bindings(expr_id);
         let bindings = self.follow_bindings(bindings);
@@ -574,13 +587,7 @@ impl Monomorphiser {
 
     fn lvalue(&mut self, lvalue: HirLValue) -> ast::LValue {
         match lvalue {
-            HirLValue::Ident(ident) => {
-                // SAFETY: using a dummy ExprId here is safe since it is only needed
-                // to retrieve types and instantiation bindings for global functions,
-                // and functions are not valid lvalues since they are immutable.
-                let ident = self.ident(ident, node_interner::ExprId::empty_block_id());
-                ast::LValue::Ident(ident)
-            }
+            HirLValue::Ident(ident) => ast::LValue::Ident(self.local_ident(ident)),
             HirLValue::MemberAccess { object, field_index, .. } => {
                 let object = Box::new(self.lvalue(*object));
                 ast::LValue::MemberAccess { object, field_index: field_index.unwrap() }

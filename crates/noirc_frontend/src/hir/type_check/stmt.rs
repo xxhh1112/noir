@@ -4,7 +4,7 @@ use crate::hir_def::stmt::{
     HirAssignStatement, HirConstrainStatement, HirLValue, HirLetStatement, HirPattern, HirStatement,
 };
 use crate::hir_def::types::Type;
-use crate::node_interner::{ExprId, NodeInterner, StmtId};
+use crate::node_interner::{DefinitionId, ExprId, NodeInterner, StmtId};
 use crate::IsConst;
 
 use super::{errors::TypeCheckError, expr::type_check_expression};
@@ -63,9 +63,21 @@ pub fn bind_pattern(
     match pattern {
         HirPattern::Identifier(ident) => interner.push_definition_type(ident.id, typ),
         HirPattern::Mutable(pattern, _) => bind_pattern(interner, pattern, typ, errors),
-        HirPattern::Tuple(_fields, _span) => {
-            todo!("Implement tuple types")
-        }
+        HirPattern::Tuple(fields, span) => match typ {
+            Type::Tuple(field_types) if field_types.len() == fields.len() => {
+                for (field, field_type) in fields.iter().zip(field_types) {
+                    bind_pattern(interner, field, field_type, errors);
+                }
+            }
+            Type::Error => (),
+            other => {
+                errors.push(TypeCheckError::TypeMismatch {
+                    expected_typ: other.to_string(),
+                    expr_typ: other.to_string(),
+                    expr_span: *span,
+                });
+            }
+        },
         HirPattern::Struct(struct_type, fields, span) => match typ {
             Type::Struct(inner, args) if &inner == struct_type => {
                 let mut pattern_fields = fields.clone();
@@ -125,15 +137,23 @@ fn type_check_lvalue(
 ) -> (Type, HirLValue) {
     match lvalue {
         HirLValue::Ident(ident) => {
-            let definition = interner.definition(ident.id);
-            if !definition.mutable {
-                errors.push(TypeCheckError::Unstructured {
-                    msg: format!("Variable {} must be mutable to be assigned to", definition.name),
-                    span: ident.location.span,
-                });
-            }
+            let typ = if ident.id == DefinitionId::dummy_id() {
+                Type::Error
+            } else {
+                let definition = interner.definition(ident.id);
+                if !definition.mutable {
+                    errors.push(TypeCheckError::Unstructured {
+                        msg: format!(
+                            "Variable {} must be mutable to be assigned to",
+                            definition.name
+                        ),
+                        span: ident.location.span,
+                    });
+                }
+                interner.id_type(ident.id)
+            };
 
-            (interner.id_type(ident.id), HirLValue::Ident(ident))
+            (typ, HirLValue::Ident(ident))
         }
         HirLValue::MemberAccess { object, field_name, .. } => {
             let (result, object) = type_check_lvalue(interner, *object, assign_span, errors);
@@ -216,7 +236,7 @@ fn type_check_constrain_stmt(
     let expr_type = type_check_expression(interner, &stmt.0, errors);
     let expr_span = interner.expr_span(&stmt.0);
 
-    expr_type.unify(&Type::Bool(IsConst::new(interner)), expr_span, errors, &mut || {
+    expr_type.unify(&Type::Bool(IsConst::new(interner)), expr_span, errors, || {
         TypeCheckError::TypeMismatch {
             expr_typ: expr_type.to_string(),
             expected_typ: Type::Bool(IsConst::No(None)).to_string(),

@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use noirc_errors::Span;
 
 use crate::{
@@ -421,12 +419,12 @@ fn bind_function_type(
 
             let ret = interner.next_type_variable();
             let args = vecmap(args, |(arg, _)| arg);
-            let expected = Type::Function(args, Box::new(ret.clone()), BTreeSet::new());
+            let expected = Type::Function(args, Box::new(ret.clone()));
             *binding.borrow_mut() = TypeBinding::Bound(expected);
 
             ret
         }
-        Type::Function(parameters, ret, _ids) => {
+        Type::Function(parameters, ret) => {
             for (param, (arg, arg_span)) in parameters.iter().zip(args) {
                 arg.make_subtype_of(param, arg_span, errors, || TypeCheckError::TypeMismatch {
                     expected_typ: param.to_string(),
@@ -695,7 +693,7 @@ pub fn comparator_operand_type_rules(
 
         // Special-case == and != for arrays
         (Array(x_size, x_type), Array(y_size, y_type)) if matches!(op.kind, Equal | NotEqual) => {
-            x_type.unify(y_type, op.location.span, errors, &mut || {
+            x_type.unify(y_type, op.location.span, errors, || {
                 TypeCheckError::Unstructured {
                     msg: format!("Cannot compare {} and {}, the array element types differ", lhs_type, rhs_type),
                     span: op.location.span,

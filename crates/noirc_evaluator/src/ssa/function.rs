@@ -70,8 +70,13 @@ impl SSAFunction {
         let mut decision = DecisionTree::new(&igen.context);
         decision.make_decision_tree(&mut igen.context, self.entry_block);
         decision.reduce(&mut igen.context, decision.root)?;
-
-        super::optim::full_cse(&mut igen.context, self.entry_block)?;
+        //merge blocks
+        let to_remove =
+            super::block::merge_path(&mut igen.context, self.entry_block, BlockId::dummy());
+        igen.context[self.entry_block].dominated.retain(|b| !to_remove.contains(b));
+        for i in to_remove {
+            igen.context.remove_block(i);
+        }
         Ok(decision)
     }
 
@@ -134,11 +139,10 @@ impl IRGenerator {
         let mut func = SSAFunction::new(func_id, &function.name, func_block, index, &self.context);
 
         //argumemts:
-        for (param_id, param_type, param_name) in std::mem::take(&mut function.parameters) {
+        for (param_id, mutable, param_name, param_type) in std::mem::take(&mut function.parameters)
+        {
             let node_ids = self.create_function_parameter(param_id, &param_type, &param_name);
-
-            // TODO: All function arguments are pessimistically assumed to be mutable
-            func.arguments.extend(node_ids.into_iter().map(|id| (id, true)));
+            func.arguments.extend(node_ids.into_iter().map(|id| (id, mutable)));
         }
 
         self.function_context = Some(index);
@@ -213,17 +217,13 @@ impl IRGenerator {
         //REM: we do not check that the nb of inputs correspond to the function signature, it is done in the frontend
 
         //Output:
-        let result_signature = get_result_type(op);
-        let result_type = if result_signature.0 > 1 {
+        let (len, elem_type) = get_result_type(op);
+        let result_type = if len > 1 {
             //We create an array that will contain the result and set the res_type to point to that array
-            let result_index = self.context.mem.create_new_array(
-                result_signature.0,
-                result_signature.1,
-                &format!("{}_result", op),
-            );
+            let result_index = self.new_array(&format!("{}_result", op), elem_type, len, None).1;
             node::ObjectType::Pointer(result_index)
         } else {
-            result_signature.1
+            elem_type
         };
 
         //when the function returns an array, we use ins.res_type(array)

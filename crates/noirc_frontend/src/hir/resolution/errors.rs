@@ -28,6 +28,12 @@ pub enum ResolverError {
     UnnecessaryMut { first_mut: Span, second_mut: Span },
     #[error("Unneeded 'pub', function is not the main method")]
     UnnecessaryPub { ident: Ident },
+    #[error("Required 'pub', main function must return public value")]
+    NecessaryPub { ident: Ident },
+    #[error("Expected const value where non-constant value was used")]
+    ExpectedConstVariable { name: String, span: Span },
+    #[error("Missing expression for declared constant")]
+    MissingRhsExpr { name: String, span: Span },
 }
 
 impl ResolverError {
@@ -53,8 +59,8 @@ impl ResolverError {
                     "unused variable ".to_string(),
                     ident.0.span(),
                 );
-
-                diag.add_note("A new variable usually means a constraint has been added and is being unused. \n For this reason, it is almost always a bug to declare a variable and not use it.".to_owned());
+                let message = format!("A new variable usually means a constraint has been added and is being unused. \n For this reason, it is almost always a bug to declare a variable and not use it. \n help: if this is intentional, prefix it with an underscore: `_{}`", name);
+                diag.add_note(message);
                 diag
             }
             ResolverError::VariableNotDeclared { mut path } => {
@@ -152,6 +158,31 @@ impl ResolverError {
                 diag.add_note("The `pub` keyword only has effects on arguments to the main function of a program. Thus, adding it to other function parameters can be deceiving and should be removed".to_owned());
                 diag
             }
+            ResolverError::NecessaryPub { ident } => {
+                let name = &ident.0.contents;
+
+                let mut diag = Diagnostic::simple_error(
+                    format!("missing pub keyword on return type of function {}", name),
+                    "missing pub on return type".to_string(),
+                    ident.0.span(),
+                );
+
+                diag.add_note("The `pub` keyword is mandatory for the main function return type because the verifier cannot retrieve private witness and thus the function will not be able to return a 'priv' value".to_owned());
+                diag
+            }
+            ResolverError::ExpectedConstVariable { name, span } => Diagnostic::simple_error(
+                format!("expected constant variable where non-constant variable {} was used", name),
+                "expected const variable".to_string(),
+                span,
+            ),
+            ResolverError::MissingRhsExpr { name, span } => Diagnostic::simple_error(
+                format!(
+                    "no expression specifying the value stored by the constant variable {}",
+                    name
+                ),
+                "expected expression to be stored for let statement".to_string(),
+                span,
+            ),
         }
     }
 }

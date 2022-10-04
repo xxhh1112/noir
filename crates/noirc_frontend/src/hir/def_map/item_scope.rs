@@ -1,6 +1,6 @@
 use super::{namespace::PerNs, ModuleDefId, ModuleId};
 use crate::{
-    node_interner::{Definition, FuncId, NodeInterner, StructId},
+    node_interner::{Definition, FuncId, NodeInterner, StmtId, StructId},
     Ident,
 };
 use std::collections::{hash_map::Entry, HashMap};
@@ -51,6 +51,7 @@ impl ItemScope {
             ModuleDefId::ModuleId(_) => add_item(&mut self.types),
             ModuleDefId::VariableId(_) => add_item(&mut self.values),
             ModuleDefId::TypeId(_) => add_item(&mut self.types),
+            ModuleDefId::ConstId(_) => add_item(&mut self.values),
         }
     }
 
@@ -80,6 +81,14 @@ impl ItemScope {
         self.add_definition(name, ModuleDefId::TypeId(local_id))
     }
 
+    pub fn define_global_const_def(
+        &mut self,
+        name: Ident,
+        stmt_id: StmtId,
+    ) -> Result<(), (Ident, Ident)> {
+        self.add_definition(name, ModuleDefId::ConstId(stmt_id))
+    }
+
     pub fn find_module_with_name(&self, mod_name: &Ident) -> Option<&ModuleId> {
         let (module_def, _) = self.types.get(mod_name)?;
         match module_def {
@@ -96,8 +105,8 @@ impl ItemScope {
         let (module_def, _) = self.values.get(func_name)?;
         match module_def {
             ModuleDefId::VariableId(id) => match interner.definition(*id).definition {
-                Definition::Local => None,
                 Definition::Function(id) => Some(id),
+                _ => None,
             },
             _ => None,
         }

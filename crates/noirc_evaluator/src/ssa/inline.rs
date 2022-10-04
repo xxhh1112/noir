@@ -80,7 +80,7 @@ fn inline_block(
                                 *func_id,
                                 arguments.clone(),
                                 returned_arrays.clone(),
-                                ins.parent_block,
+                                block_id,
                             ));
                         }
                     } else {
@@ -89,7 +89,7 @@ fn inline_block(
                             *func_id,
                             arguments.clone(),
                             returned_arrays.clone(),
-                            ins.parent_block,
+                            block_id,
                         ));
                     }
                 }
@@ -105,7 +105,7 @@ fn inline_block(
     }
 
     if to_inline.is_none() {
-        optim::cse(ctx, block_id)?; //handles the deleted call instructions
+        optim::simple_cse(ctx, block_id);
     }
     Ok(result)
 }
@@ -149,10 +149,9 @@ impl StackFrame {
         if after {
             pos += 1;
         }
-        for new_id in self.stack.iter_mut() {
-            ctx[block].instructions.insert(pos, *new_id);
-            pos += 1;
-        }
+        let after = ctx[block].instructions.split_off(pos);
+        ctx[block].instructions.extend_from_slice(&self.stack);
+        ctx[block].instructions.extend_from_slice(&after);
         self.stack.clear();
     }
 }

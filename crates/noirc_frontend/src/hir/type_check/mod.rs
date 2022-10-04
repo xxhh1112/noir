@@ -11,7 +11,7 @@ use expr::type_check_expression;
 
 use crate::node_interner::{FuncId, NodeInterner};
 
-use self::stmt::bind_pattern;
+pub(crate) use self::stmt::{bind_pattern, type_check};
 
 /// Type checks a function and assigns the
 /// appropriate types to expressions in a side table
@@ -53,7 +53,7 @@ pub fn type_check_func(interner: &mut NodeInterner, func_id: FuncId) -> Vec<Type
 /// We can either build a test apparatus or pass raw code through the resolver
 #[cfg(test)]
 mod test {
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::HashMap;
 
     use fm::FileId;
     use noirc_errors::{Location, Span};
@@ -67,7 +67,7 @@ mod test {
     use crate::{graph::CrateId, Ident};
     use crate::{
         hir::{
-            def_map::{CrateDefMap, ModuleDefId},
+            def_map::{CrateDefMap, LocalModuleId, ModuleDefId},
             resolution::{path_resolver::PathResolver, resolver::Resolver},
         },
         parse_program, FunctionKind, Path,
@@ -89,7 +89,7 @@ mod test {
         // let z = x + y;
         //
         // Push x variable
-        let x_id = interner.push_definition("x".into(), false);
+        let x_id = interner.push_definition("x".into(), false, false, None);
 
         // Safety: The FileId in a location isn't used for tests
         let file = FileId::default();
@@ -98,11 +98,11 @@ mod test {
         let x = HirIdent { id: x_id, location };
 
         // Push y variable
-        let y_id = interner.push_definition("y".into(), false);
+        let y_id = interner.push_definition("y".into(), false, false, None);
         let y = HirIdent { id: y_id, location };
 
         // Push z variable
-        let z_id = interner.push_definition("z".into(), false);
+        let z_id = interner.push_definition("z".into(), false, false, None);
         let z = HirIdent { id: z_id, location };
 
         // Push x and y as expressions
@@ -129,7 +129,10 @@ mod test {
         let func = HirFunction::unsafe_from_expr(expr_id);
         let func_id = interner.push_fn(func);
 
-        let name = HirIdent { location, id: interner.push_definition("test_func".into(), false) };
+        let name = HirIdent {
+            location,
+            id: interner.push_definition("test_func".into(), false, false, None),
+        };
 
         // Add function meta
         let func_meta = FuncMeta {
@@ -137,11 +140,7 @@ mod test {
             kind: FunctionKind::Normal,
             attributes: None,
             location,
-            typ: Type::Function(
-                vec![Type::field(None), Type::field(None)],
-                Box::new(Type::Unit),
-                BTreeSet::new(),
-            ),
+            typ: Type::Function(vec![Type::field(None), Type::field(None)], Box::new(Type::Unit)),
             parameters: vec![
                 Param(Identifier(x), Type::field(None), noirc_abi::AbiFEType::Private),
                 Param(Identifier(y), Type::field(None), noirc_abi::AbiFEType::Private),
@@ -226,6 +225,10 @@ mod test {
                 None => Err(name.clone()),
                 Some(_) => Ok(mod_def),
             }
+        }
+
+        fn local_module_id(&self) -> LocalModuleId {
+            LocalModuleId::dummy_id()
         }
     }
 

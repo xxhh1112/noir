@@ -40,7 +40,7 @@ pub struct Evaluator {
 // Standard format requires the number of witnesses. The max number is also fine.
 // If we had a composer object, we would not need it
 pub fn create_circuit(
-    program: Functions,
+    program: Program,
     np_language: Language,
     enable_logging: bool,
 ) -> Result<Circuit, RuntimeError> {
@@ -109,7 +109,7 @@ impl Evaluator {
     pub fn evaluate_main_alt(
         &mut self,
         env: &mut Environment,
-        program: Functions,
+        program: Program,
         enable_logging: bool,
     ) -> Result<(), RuntimeError> {
         let mut igen = IRGenerator::new(program);
@@ -161,7 +161,6 @@ impl Evaluator {
                 if let AbiType::Integer { width, .. } = typ.as_ref() {
                     element_width = Some(*width);
                 }
-
                 for _ in 0..*length {
                     let witness = self.add_witness_to_cs();
                     witnesses.push(witness);
@@ -207,7 +206,7 @@ impl Evaluator {
         let abi_params = std::mem::take(&mut igen.program.abi.parameters);
         assert_eq!(main_params.len(), abi_params.len());
 
-        for ((param_id, _, param_name1), (param_name2, param_type)) in
+        for ((param_id, _, param_name1, _), (param_name2, param_type)) in
             main_params.iter().zip(abi_params)
         {
             assert_eq!(param_name1, &param_name2);
