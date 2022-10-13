@@ -22,6 +22,7 @@ use noirc_frontend::{
     node_interner::{ExprId, FuncId, StmtId},
 };
 use noirc_frontend::{BinaryOpKind, Type};
+
 pub struct Interpreter<'a> {
     pub context: &'a Context,
     main_function: FuncId,

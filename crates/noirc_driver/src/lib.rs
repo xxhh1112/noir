@@ -159,7 +159,6 @@ impl Driver {
         let abi = func_meta.into_abi(&self.context.def_interner);
 
         let ast = monomorphise(main_function, self.context.def_interner);
-        println!("{}", ast);
 
         // Compile Program
         let circuit = match create_circuit(ast, np_language, show_ssa) {

@@ -39,8 +39,8 @@ fn main() {
         println!("func name is {:?}", name);
         let func_id = match def_id {
             ModuleDefId::VariableId(id) => match context.def_interner.definition(*id).definition {
-                Definition::Local => unreachable!(),
                 Definition::Function(id) => id,
+                _ => unreachable!(),
             },
             _ => unreachable!(),
         };
