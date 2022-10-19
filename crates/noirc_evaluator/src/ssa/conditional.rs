@@ -539,7 +539,7 @@ impl DecisionTree {
         let mut candidates = Vec::new();
         let keep_call_and_store = |node_id: NodeId| -> bool {
             let ins = ctx.get_instruction(node_id);
-            matches!(ins.operation.opcode(), Opcode::Call(_) | Opcode::Store(_))
+            matches!(ins.operation.opcode(), Opcode::Call | Opcode::Store(_))
         };
         let l_iter = left.iter().enumerate().filter(|&i| keep_call_and_store(*i.1));
         let mut r_iter = right.iter().enumerate().filter(|&i| keep_call_and_store(*i.1));

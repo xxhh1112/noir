@@ -548,7 +548,7 @@ impl SsaContext {
         name: &str,
         element_type: ObjectType,
         len: u32,
-        def_id: Option<DefinitionId>,
+        def_id: Option<Definition>,
     ) -> (NodeId, ArrayId) {
         let array_index = self.mem.create_new_array(len, element_type, name);
         self.add_dummy_load(array_index);
