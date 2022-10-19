@@ -202,15 +202,18 @@ impl IRGenerator {
         let operation = node::Operation::Call { func, arguments, returned_arrays, predicate };
         let call_instruction = self.context.new_instruction(operation, ObjectType::NotAnObject)?;
 
-        let rtt = self.context.functions[&call.func_id].result_types.clone();
-        let mut result = Vec::new();
-        for i in rtt.iter().enumerate() {
-            result.push(self.context.new_instruction(
+        let result_count = match &call.return_type {
+            Type::Tuple(fields) => fields.len(),
+            _ => 1,
+        };
+
+        let result = try_vecmap(0..result_count, |i| {
+            Ok(Value::Single(self.context.new_instruction(
                 node::Operation::Result { call_instruction, index: i.0 as u32 },
-                *i.1,
-            )?);
-        }
-        Ok(result)
+                i,
+            )?))
+        })?;
+        Ok(Value::Tuple(result))
     }
 
     //Lowlevel functions with no more than 2 arguments

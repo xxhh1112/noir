@@ -286,14 +286,15 @@ fn cse_block_with_anchor(
                         let id = ctx.get_dummy_store(a.0);
                         anchor.push_mem_instruction(ctx, id);
                     }
-                    if let Some(f) = ctx.get_ssafunc(*func_id) {
-                        for typ in &f.result_types {
-                            if let ObjectType::Pointer(a) = typ {
-                                let id = ctx.get_dummy_store(*a);
-                                anchor.push_mem_instruction(ctx, id);
-                            }
-                        }
-                    }
+                    // TODO: Test, why is this necessary? Is there a workaround to re-add it?
+                    // if let Some(f) = ctx.get_ssafunc(*func_id) {
+                    //     for typ in &f.result_types {
+                    //         if let ObjectType::Pointer(a) = typ {
+                    //             let id = ctx.get_dummy_store(*a);
+                    //             anchor.push_mem_instruction(ctx, id);
+                    //         }
+                    //     }
+                    // }
                     //Add dunmmy load for function arguments:
                     for arg in arguments {
                         if let Some(obj) = ctx.try_get_node(*arg) {

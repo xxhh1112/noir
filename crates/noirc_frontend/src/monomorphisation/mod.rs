@@ -515,8 +515,9 @@ impl Monomorphiser {
         let return_type = self.interner.id_type(id);
         let typ = Self::convert_type(&return_type);
 
-        self.try_evaluate_call(&func, &call.arguments)
-            .unwrap_or_else(|| ast::Expression::Call(ast::Call { func, arguments, typ }))
+        self.try_evaluate_call(&func, &call.arguments).unwrap_or_else(|| {
+            ast::Expression::Call(ast::Call { func, arguments, return_type: typ })
+        })
     }
 
     /// Try to evaluate certain builtin functions (currently only 'arraylen')

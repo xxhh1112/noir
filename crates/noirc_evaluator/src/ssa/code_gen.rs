@@ -10,8 +10,6 @@ use super::super::environment::Environment;
 use super::super::errors::RuntimeError;
 
 use crate::ssa::block::BlockType;
-use crate::ssa::function;
-use acvm::acir::OPCODE;
 use acvm::FieldElement;
 use noirc_frontend::monomorphisation::ast::*;
 use noirc_frontend::util::vecmap;
@@ -130,7 +128,7 @@ impl IRGenerator {
     pub fn abi_array(
         &mut self,
         name: &str,
-        ident_def: Definition,
+        ident_def: LocalId,
         el_type: &noirc_abi::AbiType,
         len: u128,
         witness: Vec<acvm::acir::native_types::Witness>,
@@ -143,7 +141,9 @@ impl IRGenerator {
             },
             noirc_abi::AbiType::Array { .. } => unreachable!(),
         };
-        let (v_id, array_idx) = self.new_array(name, element_type, len as u32, Some(ident_def));
+
+        let definition = Some(Definition::Local(ident_def));
+        let (v_id, array_idx) = self.new_array(name, element_type, len as u32, definition);
         self.context.mem[array_idx].values = vecmap(witness, |w| w.into());
         self.context.get_current_block_mut().update_variable(v_id, v_id);
     }
@@ -151,17 +151,19 @@ impl IRGenerator {
     pub fn abi_var(
         &mut self,
         name: &str,
-        ident_def: Definition,
+        ident_def: LocalId,
         obj_type: node::ObjectType,
         witness: acvm::acir::native_types::Witness,
     ) {
+        let def = Definition::Local(ident_def);
+
         //new variable - should be in a let statement? The let statement should set the type
         let var = node::Variable {
             id: NodeId::dummy(),
             name: name.to_string(),
             obj_type,
             root: None,
-            def: Some(ident_def.clone()),
+            def: Some(def),
             witness: Some(witness),
             parent_block: self.context.current_block,
         };
@@ -169,7 +171,7 @@ impl IRGenerator {
 
         self.context.get_current_block_mut().update_variable(v_id, v_id);
         let v_value = Value::Single(v_id);
-        self.variable_values.insert(ident_def, v_value); //TODO ident_def or ident_id??
+        self.variable_values.insert(def, v_value);
     }
 
     fn codegen_identifier(&mut self, ident: &Ident) -> Value {
@@ -222,9 +224,9 @@ impl IRGenerator {
         Ok((a_id, index))
     }
 
-    fn lvalue_ident_def(lvalue: &LValue) -> DefinitionId {
+    fn lvalue_ident_def(lvalue: &LValue) -> &Definition {
         match lvalue {
-            LValue::Ident(ident) => ident.id,
+            LValue::Ident(ident) => &ident.definition,
             LValue::Index { array, .. } => Self::lvalue_ident_def(array.as_ref()),
             LValue::MemberAccess { object, .. } => Self::lvalue_ident_def(object.as_ref()),
         }
@@ -298,7 +300,7 @@ impl IRGenerator {
         name: &str,
         element_type: ObjectType,
         len: u32,
-        def_id: Option<DefinitionId>,
+        def_id: Option<Definition>,
     ) -> (NodeId, ArrayId) {
         let (id, array_id) = self.context.new_array(name, element_type, len, def_id);
         if let Some(def) = def_id {
@@ -512,13 +514,6 @@ impl IRGenerator {
                 Ok(Value::Single(self.context.new_instruction(load, e_type)?))
             }
             Expression::Call(call_expr) => self.call(call_expr, env),
-            Expression::CallLowLevel(call) => Ok(Value::Single(self.codegen_lowlevel(env, call)?)),
-            Expression::CallBuiltin(_call) => {
-                todo!()
-                // let attribute = func_meta.attributes.expect("all builtin functions must contain an attribute which contains the function name which it links to");
-                // let builtin_name = attribute.builtin().expect("ice: function marked as a builtin, but attribute kind does not match this");
-                // builtin::call_builtin(self, env, builtin_name, (call_expr,span))
-            }
             Expression::For(for_expr) => self.codegen_for(env, for_expr),
             Expression::Tuple(fields) => self.codegen_tuple(env, fields),
             Expression::If(if_expr) => self.handle_if_expr(env, if_expr),
@@ -542,22 +537,6 @@ impl IRGenerator {
             Expression::Semi(expr) => {
                 self.codegen_expression(env, expr.as_ref())?;
                 Ok(Value::dummy())
-            }
-        }
-    }
-
-    fn codegen_lowlevel(
-        &mut self,
-        env: &mut Environment,
-        call: &CallLowLevel,
-    ) -> Result<NodeId, RuntimeError> {
-        match OPCODE::lookup(&call.opcode) {
-            Some(func) => self.call_low_level(func, call, env),
-            None => {
-                unreachable!(
-                    "cannot find a low level opcode with the name {} in the IR",
-                    &call.opcode
-                )
             }
         }
     }

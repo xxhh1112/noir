@@ -6,7 +6,7 @@ use acvm::acir::OPCODE;
 use acvm::FieldElement;
 use arena;
 use noirc_errors::Location;
-use noirc_frontend::monomorphisation::ast::{Definition, FuncId, Type};
+use noirc_frontend::monomorphisation::ast::{Definition, Type};
 use noirc_frontend::util::vecmap;
 use noirc_frontend::{BinaryOpKind, Signedness};
 use num_bigint::BigUint;
@@ -590,9 +590,9 @@ pub enum Opcode {
     Jmp, //unconditional jump
     Phi,
 
-    Call(FuncId), //Call a function
-    Return,       //Return value(s) from a function block
-    Results,      //Get result(s) from a function call
+    Call,    //Call a function
+    Return,  //Return value(s) from a function block
+    Results, //Get result(s) from a function call
 
     //memory
     Load(ArrayId),
@@ -1193,7 +1193,7 @@ impl Operation {
             Operation::Jmp(_) => Opcode::Jmp,
             Operation::Phi { .. } => Opcode::Phi,
             Operation::Cond { .. } => Opcode::Cond,
-            Operation::Call { func: func_id, .. } => Opcode::Call(*func_id),
+            Operation::Call { .. } => Opcode::Call,
             Operation::Return(_) => Opcode::Return,
             Operation::Result { .. } => Opcode::Results,
             Operation::Load { array_id, .. } => Opcode::Load(*array_id),

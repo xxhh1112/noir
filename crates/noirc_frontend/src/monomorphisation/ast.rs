@@ -107,7 +107,7 @@ pub struct ArrayLiteral {
 pub struct Call {
     pub func: Box<Expression>,
     pub arguments: Vec<Expression>,
-    pub typ: Type,
+    pub return_type: Type,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +163,7 @@ pub enum Type {
     Integer(Signedness, /*bits:*/ u32), // u32 = Integer(unsigned, 32)
     Bool,
     Unit,
+    Function(/*args:*/ Vec<Type>, /*ret:*/ Box<Type>),
     Tuple(Vec<Type>),
 }
 
@@ -252,6 +253,10 @@ impl std::fmt::Display for Type {
             },
             Type::Bool => write!(f, "bool"),
             Type::Unit => write!(f, "()"),
+            Type::Function(args, ret) => {
+                let args = vecmap(args, ToString::to_string);
+                write!(f, "fn({}) -> {}", args.join(", "), ret)
+            }
             Type::Tuple(elems) => {
                 let elems = vecmap(elems, ToString::to_string);
                 write!(f, "({})", elems.join(", "))
