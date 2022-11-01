@@ -202,15 +202,10 @@ impl IRGenerator {
         let operation = node::Operation::Call { func, arguments, returned_arrays, predicate };
         let call_instruction = self.context.new_instruction(operation, ObjectType::NotAnObject)?;
 
-        let result_count = match &call.return_type {
-            Type::Tuple(fields) => fields.len(),
-            _ => 1,
-        };
-
-        let result = try_vecmap(0..result_count, |i| {
+        let result = try_vecmap(call.return_type.flatten().into_iter().enumerate(), |(i, typ)| {
             Ok(Value::Single(self.context.new_instruction(
-                node::Operation::Result { call_instruction, index: i.0 as u32 },
-                i,
+                node::Operation::Result { call_instruction, index: i as u32 },
+                typ.into(),
             )?))
         })?;
         Ok(Value::Tuple(result))

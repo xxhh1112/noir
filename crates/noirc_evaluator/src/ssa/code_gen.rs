@@ -163,7 +163,7 @@ impl IRGenerator {
             name: name.to_string(),
             obj_type,
             root: None,
-            def: Some(def),
+            def: Some(def.clone()),
             witness: Some(witness),
             parent_block: self.context.current_block,
         };
@@ -302,7 +302,7 @@ impl IRGenerator {
         len: u32,
         def_id: Option<Definition>,
     ) -> (NodeId, ArrayId) {
-        let (id, array_id) = self.context.new_array(name, element_type, len, def_id);
+        let (id, array_id) = self.context.new_array(name, element_type, len, def_id.clone());
         if let Some(def) = def_id {
             self.variable_values.insert(def, super::code_gen::Value::Single(id));
         }
@@ -328,7 +328,8 @@ impl IRGenerator {
         match value {
             Value::Single(node_id) => {
                 let otype = self.context.get_object_type(node_id);
-                let value = self.bind_variable(name.to_owned(), Some(id), otype, node_id)?;
+                let def = Some(id.clone());
+                let value = self.bind_variable(name.to_owned(), def, otype, node_id)?;
                 self.variable_values.insert(id, value);
             }
             value @ Value::Tuple(_) => {

@@ -38,6 +38,7 @@ pub trait GadgetCaller {
     ) -> Result<Object, RuntimeError>;
 }
 
+#[allow(unused)]
 pub fn call_low_level(
     evaluator: &mut Interpreter,
     env: &mut Environment,

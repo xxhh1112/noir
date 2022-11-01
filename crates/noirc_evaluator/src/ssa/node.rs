@@ -6,7 +6,7 @@ use acvm::acir::OPCODE;
 use acvm::FieldElement;
 use arena;
 use noirc_errors::Location;
-use noirc_frontend::monomorphisation::ast::{Definition, Type};
+use noirc_frontend::monomorphisation::ast::{Definition, FuncId, Type};
 use noirc_frontend::util::vecmap;
 use noirc_frontend::{BinaryOpKind, Signedness};
 use num_bigint::BigUint;
@@ -37,6 +37,7 @@ impl std::fmt::Display for NodeObj {
             NodeObj::Obj(o) => write!(f, "{}", o),
             NodeObj::Instr(i) => write!(f, "{}", i),
             NodeObj::Const(c) => write!(f, "{}", c),
+            NodeObj::Function(func) => write!(f, "{}", func),
         }
     }
 }
@@ -44,6 +45,12 @@ impl std::fmt::Display for NodeObj {
 impl std::fmt::Display for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.value)
+    }
+}
+
+impl std::fmt::Display for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "f{}", self.func_id.0)
     }
 }
 
@@ -67,6 +74,7 @@ impl Node for NodeObj {
             NodeObj::Obj(o) => o.get_type(),
             NodeObj::Instr(i) => i.res_type,
             NodeObj::Const(o) => o.value_type,
+            NodeObj::Function(f) => f.get_type(),
         }
     }
 
@@ -75,6 +83,7 @@ impl Node for NodeObj {
             NodeObj::Obj(o) => o.size_in_bits(),
             NodeObj::Instr(i) => i.res_type.bits(),
             NodeObj::Const(c) => c.size_in_bits(),
+            NodeObj::Function(f) => f.size_in_bits(),
         }
     }
 
@@ -83,6 +92,7 @@ impl Node for NodeObj {
             NodeObj::Obj(o) => o.get_id(),
             NodeObj::Instr(i) => i.id,
             NodeObj::Const(c) => c.get_id(),
+            NodeObj::Function(f) => f.get_id(),
         }
     }
 }
@@ -101,6 +111,20 @@ impl Node for Constant {
     }
 }
 
+impl Node for Function {
+    fn get_type(&self) -> ObjectType {
+        ObjectType::NotAnObject
+    }
+
+    fn size_in_bits(&self) -> u32 {
+        0
+    }
+
+    fn get_id(&self) -> NodeId {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(pub arena::Index);
 
@@ -115,6 +139,15 @@ pub enum NodeObj {
     Obj(Variable),
     Instr(Instruction),
     Const(Constant),
+    Function(Function),
+}
+
+#[derive(Debug)]
+pub struct Function {
+    pub node_id: NodeId,
+    pub func_id: FuncId,
+    pub arguments: Vec<ObjectType>,
+    pub results: Vec<ObjectType>,
 }
 
 #[derive(Debug)]

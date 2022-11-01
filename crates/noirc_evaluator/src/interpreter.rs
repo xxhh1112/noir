@@ -471,7 +471,7 @@ impl<'a> Interpreter<'a> {
                 let index_as_u128 = index_as_constant.to_u128();
                 arr.get(index_as_u128).map_err(|kind|kind.add_location(loc))
             }
-            HirExpression::Call(call_expr) => {
+            HirExpression::Call(_) => {
                 todo!("Function calls are not implemented in the interpreter")
                 // let func_meta = self.context.def_interner.function_meta(&call_expr.func);
                 // //
@@ -506,6 +506,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    #[allow(unused)]
     fn call_function(
         &mut self,
         env: &mut Environment,

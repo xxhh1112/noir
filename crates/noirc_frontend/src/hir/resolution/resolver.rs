@@ -115,7 +115,10 @@ impl<'a> Resolver<'a> {
         for (stmt_id, const_info) in self.interner.get_all_global_consts() {
             if const_info.local_id == self.path_resolver.local_module_id() {
                 let const_stmt = self.interner.let_statement(&stmt_id);
-                self.add_global_variable_decl(const_info.ident, Definition::Const(const_stmt.expression));
+                self.add_global_variable_decl(
+                    const_info.ident,
+                    Definition::Const(const_stmt.expression),
+                );
             }
         }
 
@@ -484,7 +487,8 @@ impl<'a> Resolver<'a> {
         match stmt {
             Statement::Let(let_stmt) => {
                 let expression = self.resolve_expression(let_stmt.expression);
-                let definition = if is_global { Definition::Const(expression) } else { Definition::Local };
+                let definition =
+                    if is_global { Definition::Const(expression) } else { Definition::Local };
 
                 HirStatement::Let(HirLetStatement {
                     pattern: self.resolve_pattern(let_stmt.pattern, definition),
@@ -645,11 +649,7 @@ impl<'a> Resolver<'a> {
         expr_id
     }
 
-    fn resolve_pattern(
-        &mut self,
-        pattern: Pattern,
-        definition: Definition
-    ) -> HirPattern {
+    fn resolve_pattern(&mut self, pattern: Pattern, definition: Definition) -> HirPattern {
         self.resolve_pattern_mutable(pattern, None, definition)
     }
 
@@ -657,7 +657,7 @@ impl<'a> Resolver<'a> {
         &mut self,
         pattern: Pattern,
         mutable: Option<Span>,
-        definition: Definition
+        definition: Definition,
     ) -> HirPattern {
         match pattern {
             Pattern::Identifier(name) => {

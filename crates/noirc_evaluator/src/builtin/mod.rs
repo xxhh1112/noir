@@ -14,6 +14,7 @@ use setpub::SetPub;
 use noirc_errors::Location;
 use noirc_frontend::hir_def::expr::HirCallExpression;
 
+#[allow(unused)]
 #[derive(Debug)]
 enum BuiltInFunctions {
     ArraySum,
@@ -23,6 +24,7 @@ enum BuiltInFunctions {
 }
 
 impl BuiltInFunctions {
+    #[allow(unused)]
     fn look_up_func_name(name: &str) -> Option<BuiltInFunctions> {
         match name {
             "arraysum" => Some(BuiltInFunctions::ArraySum),
@@ -43,6 +45,7 @@ pub trait BuiltInCaller {
     ) -> Result<Object, RuntimeError>;
 }
 
+#[allow(unused)]
 pub fn call_builtin(
     evaluator: &mut Interpreter,
     env: &mut Environment,

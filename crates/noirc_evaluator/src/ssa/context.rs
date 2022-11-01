@@ -1,6 +1,6 @@
 use super::block::{BasicBlock, BlockId};
 use super::conditional::DecisionTree;
-use super::function::{FuncIndex, SSAFunction};
+use super::function::SSAFunction;
 use super::inline::StackFrame;
 use super::mem::{ArrayId, Memory};
 use super::node::{BinaryOp, Instruction, NodeId, NodeObj, ObjectType, Operation};
@@ -100,10 +100,6 @@ impl SsaContext {
             let id = self.add_instruction(dummy_store);
             self.dummy_store.insert(a, id);
         }
-    }
-
-    pub fn get_function_index(&self) -> FuncIndex {
-        FuncIndex::new(self.functions.values().len())
     }
 
     pub fn insert_block(&mut self, block: BasicBlock) -> &mut BasicBlock {
@@ -553,7 +549,7 @@ impl SsaContext {
         let array_index = self.mem.create_new_array(len, element_type, name);
         self.add_dummy_load(array_index);
         self.add_dummy_store(array_index);
-        if let Some(def) = def_id {
+        if let Some(def) = def_id.clone() {
             self.mem[array_index].def = def;
         }
         //we create a variable pointing to this MemArray
@@ -562,7 +558,7 @@ impl SsaContext {
             obj_type: node::ObjectType::Pointer(array_index),
             name: name.to_string(),
             root: None,
-            def: def_id,
+            def: def_id.clone(),
             witness: None,
             parent_block: self.current_block,
         };
@@ -790,7 +786,7 @@ impl SsaContext {
             obj_type: lhs_type,
             name: String::new(),
             root: None,
-            def: lhs_obj.def,
+            def: lhs_obj.def.clone(),
             witness: None,
             parent_block: self.current_block,
         };
@@ -869,7 +865,7 @@ impl SsaContext {
                 obj_type: lhs_type,
                 name: String::new(),
                 root: None,
-                def: lhs_obj.def,
+                def: lhs_obj.def.clone(),
                 witness: None,
                 parent_block: self.current_block,
             };
@@ -945,6 +941,13 @@ impl SsaContext {
             let phi_id = self.add_instruction(new_phi);
             self[exit_block].instructions.insert(1, phi_id);
             phi_id
+        }
+    }
+
+    pub fn try_find_function(&self, id: NodeId) -> Option<FuncId> {
+        match self.try_get_node(id) {
+            Some(NodeObj::Function(f)) => Some(f.func_id),
+            _ => None,
         }
     }
 }
