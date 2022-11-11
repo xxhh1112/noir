@@ -62,7 +62,7 @@ mod test {
     use crate::hir_def::stmt::HirLetStatement;
     use crate::hir_def::stmt::HirPattern::Identifier;
     use crate::hir_def::types::Type;
-    use crate::node_interner::{FuncId, NodeInterner};
+    use crate::node_interner::{Definition, FuncId, NodeInterner};
     use crate::BinaryOpKind;
     use crate::{graph::CrateId, Ident};
     use crate::{
@@ -89,7 +89,7 @@ mod test {
         // let z = x + y;
         //
         // Push x variable
-        let x_id = interner.push_definition("x".into(), false, false, None);
+        let x_id = interner.push_definition("x".into(), false, Definition::Local);
 
         // Safety: The FileId in a location isn't used for tests
         let file = FileId::default();
@@ -98,11 +98,11 @@ mod test {
         let x = HirIdent { id: x_id, location };
 
         // Push y variable
-        let y_id = interner.push_definition("y".into(), false, false, None);
+        let y_id = interner.push_definition("y".into(), false, Definition::Local);
         let y = HirIdent { id: y_id, location };
 
         // Push z variable
-        let z_id = interner.push_definition("z".into(), false, false, None);
+        let z_id = interner.push_definition("z".into(), false, Definition::Local);
         let z = HirIdent { id: z_id, location };
 
         // Push x and y as expressions
@@ -131,7 +131,7 @@ mod test {
 
         let name = HirIdent {
             location,
-            id: interner.push_definition("test_func".into(), false, false, None),
+            id: interner.push_definition("test_func".into(), false, Definition::Local),
         };
 
         // Add function meta
@@ -233,8 +233,9 @@ mod test {
     }
 
     impl TestPathResolver {
-        pub fn insert_func(&mut self, name: String, func_id: FuncId) {
-            self.0.insert(name, func_id.into());
+        pub fn insert_func(&mut self, name: String, func_id: FuncId, interner: &mut NodeInterner) {
+            let def = interner.push_function_definition(name.clone(), func_id);
+            self.0.insert(name, ModuleDefId::VariableId(def));
         }
     }
 
@@ -255,7 +256,7 @@ mod test {
 
         let mut path_resolver = TestPathResolver(HashMap::new());
         for (name, id) in func_namespace.into_iter().zip(func_ids.clone()) {
-            path_resolver.insert_func(name, id);
+            path_resolver.insert_func(name, id, &mut interner);
         }
 
         let def_maps: HashMap<CrateId, CrateDefMap> = HashMap::new();

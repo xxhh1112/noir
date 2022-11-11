@@ -154,12 +154,6 @@ pub struct NodeInterner {
     /// to map callsite types back onto function parameter types, and undo this binding as needed.
     instantiation_bindings: HashMap<ExprId, TypeBindings>,
 
-    /// Temporary map needed to store the function type of Call expressions since we cannot store
-    /// it on a FuncId for every different call. This can be removed once call expressions can take
-    /// arbitrary expressions in the function position since it would then be stored on the
-    /// variable.
-    function_types: HashMap<ExprId, Type>,
-
     /// Remembers the field index a given HirMemberAccess expression was resolved to during type
     /// checking.
     field_indices: HashMap<ExprId, usize>,
@@ -173,8 +167,19 @@ pub struct NodeInterner {
 pub struct DefinitionInfo {
     pub name: String,
     pub mutable: bool,
-    pub is_global: bool,
-    pub rhs: Option<ExprId>, // We must store the rhs of a let statement as it might be needed during resolution. Such as for finding the variable used by fixed sized arrays
+    pub definition: Definition,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Definition {
+    /// A local definition (e.g. a parameter or let binding) is one that is expected
+    /// to always be compiled in-order. ie. its references can never be found before its definition.
+    Local,
+
+    /// Functions can be referred to before they are defined.
+    Function(FuncId),
+
+    Const(ExprId),
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +198,6 @@ impl Default for NodeInterner {
             id_to_type: HashMap::new(),
             structs: HashMap::new(),
             instantiation_bindings: HashMap::new(),
-            function_types: HashMap::new(),
             field_indices: HashMap::new(),
             next_type_variable_id: 0,
             globals: HashMap::new(),
@@ -328,12 +332,20 @@ impl NodeInterner {
         &mut self,
         name: String,
         mutable: bool,
-        is_global: bool,
-        rhs: Option<ExprId>,
+        definition: Definition,
     ) -> DefinitionId {
         let id = self.definitions.len();
-        self.definitions.push(DefinitionInfo { name, mutable, is_global, rhs });
+        self.definitions.push(DefinitionInfo { name, mutable, definition });
+        DefinitionId(id)
+    }
 
+    pub fn push_function_definition(&mut self, name: String, func: FuncId) -> DefinitionId {
+        let id = self.definitions.len();
+        self.definitions.push(DefinitionInfo {
+            name,
+            mutable: false,
+            definition: Definition::Function(func),
+        });
         DefinitionId(id)
     }
 
@@ -475,19 +487,23 @@ impl NodeInterner {
         &self.instantiation_bindings[&expr_id]
     }
 
-    pub fn function_type(&self, expr_id: ExprId) -> &Type {
-        &self.function_types[&expr_id]
-    }
-
-    pub fn set_function_type(&mut self, expr_id: ExprId, typ: Type) {
-        self.function_types.insert(expr_id, typ);
-    }
-
     pub fn get_field_index(&self, expr_id: ExprId) -> usize {
         self.field_indices[&expr_id]
     }
 
     pub fn set_field_index(&mut self, expr_id: ExprId, index: usize) {
         self.field_indices.insert(expr_id, index);
+    }
+}
+
+impl DefinitionInfo {
+    pub fn is_global_const(&self) -> bool {
+        self.definition.is_global_const()
+    }
+}
+
+impl Definition {
+    pub fn is_global_const(&self) -> bool {
+        matches!(self, Definition::Const(_))
     }
 }

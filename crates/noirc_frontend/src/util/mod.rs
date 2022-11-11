@@ -6,3 +6,12 @@ where
 {
     iterable.into_iter().map(f).collect()
 }
+
+/// Equivalent to .into_iter().map(f).collect::<Result<Vec<_>>, _>()
+pub fn try_vecmap<T, U, E, F>(iterable: T, f: F) -> Result<Vec<U>, E>
+where
+    T: IntoIterator,
+    F: FnMut(T::Item) -> Result<U, E>,
+{
+    iterable.into_iter().map(f).collect()
+}

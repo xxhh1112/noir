@@ -143,7 +143,7 @@ impl<'a> ModCollector<'a> {
             // Add function to scope/ns of the module
             let result = self.def_collector.def_map.modules[self.module_id.0]
                 .scope
-                .define_func_def(name, func_id);
+                .define_func_def(name, func_id, &mut context.def_interner);
 
             if let Err((first_def, second_def)) = result {
                 errors.push(

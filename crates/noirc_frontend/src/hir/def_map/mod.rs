@@ -1,7 +1,7 @@
 use crate::graph::CrateId;
 use crate::hir::def_collector::dc_crate::DefCollector;
 use crate::hir::Context;
-use crate::node_interner::FuncId;
+use crate::node_interner::{FuncId, NodeInterner};
 use crate::parser::{parse_program, ParsedModule};
 use arena::{Arena, Index};
 use fm::{FileId, FileManager};
@@ -94,14 +94,14 @@ impl CrateDefMap {
     }
 
     /// Find the main function for this crate
-    pub fn main_function(&self) -> Option<FuncId> {
+    pub fn main_function(&self, interner: &NodeInterner) -> Option<FuncId> {
         const MAIN_FUNCTION: &str = "main";
 
         let root_module = &self.modules()[self.root.0];
 
         // This function accepts an Ident, so we attach a dummy span to
         // "main". Equality is implemented only on the contents.
-        root_module.scope.find_func_with_name(&MAIN_FUNCTION.into())
+        root_module.scope.find_func_with_name(&MAIN_FUNCTION.into(), interner)
     }
 
     pub fn root_file_id(&self) -> FileId {

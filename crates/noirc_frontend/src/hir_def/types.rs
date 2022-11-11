@@ -456,16 +456,7 @@ impl std::fmt::Display for Type {
                 Signedness::Signed => write!(f, "{}i{}", comptime, num_bits),
                 Signedness::Unsigned => write!(f, "{}u{}", comptime, num_bits),
             },
-            Type::PolymorphicInteger(_, binding) => {
-                if let TypeBinding::Unbound(_) = &*binding.borrow() {
-                    // Show a Field by default if this PolymorphicInteger is unbound, since that is
-                    // what they bind to by default anyway. It is less confusing than displaying it
-                    // as a generic.
-                    write!(f, "Field")
-                } else {
-                    write!(f, "{}", binding.borrow())
-                }
-            }
+            Type::PolymorphicInteger(_, binding) => write!(f, "{}", binding.borrow()),
             Type::Struct(s, args) => {
                 let args = vecmap(args, |arg| arg.to_string());
                 if args.is_empty() {
@@ -965,9 +956,7 @@ impl Type {
                 TypeBinding::Bound(typ) => typ.as_abi_type(fe_type),
                 TypeBinding::Unbound(_) => Type::default_int_type(None).as_abi_type(fe_type),
             },
-            Type::Bool(_) => {
-                AbiType::Integer { sign: noirc_abi::Sign::Unsigned, width: 1, visibility: fe_type }
-            }
+            Type::Bool(_) => panic!("currently, cannot have a bool in the entry point function"),
             Type::Error => unreachable!(),
             Type::Unit => unreachable!(),
             Type::ArrayLength(_) => unreachable!(),

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use crate::{
     hir_def::{
         expr::*,
-        function::{FuncMeta, Parameters},
+        function::Parameters,
         stmt::{HirAssignStatement, HirLValue, HirLetStatement, HirPattern, HirStatement},
     },
     node_interner::{self, NodeInterner, StmtId},
@@ -11,7 +11,7 @@ use crate::{
     Comptime, FunctionKind, TypeBinding, TypeBindings,
 };
 
-use self::ast::{DefinitionId, FuncId, Program};
+use self::ast::{Definition, FuncId, LocalId, Program};
 
 pub mod ast;
 pub mod printer;
@@ -21,7 +21,7 @@ struct Monomorphiser {
     // only locals are cleared on each function call and only globals are monomorphised.
     // Nested HashMaps in globals lets us avoid cloning HirTypes when calling .get()
     globals: HashMap<node_interner::FuncId, HashMap<HirType, FuncId>>,
-    locals: HashMap<node_interner::DefinitionId, DefinitionId>,
+    locals: HashMap<node_interner::DefinitionId, LocalId>,
 
     /// Queue of functions to monomorphise next
     queue: VecDeque<(node_interner::FuncId, FuncId, TypeBindings)>,
@@ -62,28 +62,59 @@ impl Monomorphiser {
         }
     }
 
-    fn next_definition_id(&mut self) -> DefinitionId {
+    fn next_local_id(&mut self) -> LocalId {
         let id = self.next_local_id;
         self.next_local_id += 1;
-        DefinitionId(id)
+        LocalId(id)
     }
 
-    fn next_function_id(&mut self) -> ast::FuncId {
+    fn next_function_id(&mut self) -> FuncId {
         let id = self.next_function_id;
         self.next_function_id += 1;
         ast::FuncId(id)
     }
 
-    fn lookup_local(&mut self, id: node_interner::DefinitionId) -> Option<DefinitionId> {
-        self.locals.get(&id).copied()
+    fn lookup_local(&mut self, id: node_interner::DefinitionId) -> Definition {
+        Definition::Local(self.locals[&id])
     }
 
-    /// Prerequisite: typ = typ.follow_bindings()
-    fn lookup_global(&mut self, id: node_interner::FuncId, typ: &HirType) -> Option<FuncId> {
-        self.globals.get(&id).and_then(|inner_map| inner_map.get(typ)).copied()
+    fn lookup_function(
+        &mut self,
+        id: node_interner::FuncId,
+        expr_id: node_interner::ExprId,
+        typ: &HirType,
+    ) -> Definition {
+        let typ = typ.follow_bindings();
+        match self.globals.get(&id).and_then(|inner_map| inner_map.get(&typ)) {
+            Some(id) => Definition::Function(*id),
+            None => {
+                // Function has not been monomorphised yet
+                let meta = self.interner.function_meta(&id);
+                match meta.kind {
+                    FunctionKind::LowLevel => {
+                        let attribute = meta.attributes.expect("all low level functions must contain an attribute which contains the opcode which it links to");
+                        let opcode = attribute.foreign().expect(
+                            "ice: function marked as foreign, but attribute kind does not match this",
+                        );
+                        Definition::LowLevel(opcode)
+                    }
+                    FunctionKind::Builtin => {
+                        let attribute = meta.attributes.expect("all low level functions must contain an attribute which contains the opcode which it links to");
+                        let opcode = attribute.builtin().expect(
+                            "ice: function marked as builtin, but attribute kind does not match this",
+                        );
+                        Definition::Builtin(opcode)
+                    }
+                    FunctionKind::Normal => {
+                        let id = self.queue_function(id, expr_id, typ);
+                        Definition::Function(id)
+                    }
+                }
+            }
+        }
     }
 
-    fn define_local(&mut self, id: node_interner::DefinitionId, new_id: DefinitionId) {
+    fn define_local(&mut self, id: node_interner::DefinitionId, new_id: LocalId) {
         self.locals.insert(id, new_id);
     }
 
@@ -99,21 +130,20 @@ impl Monomorphiser {
         let main_meta = self.interner.function_meta(&main_id);
 
         if main.return_type != ast::Type::Unit {
-            let id = self.next_definition_id();
+            let id = self.next_local_id();
 
             main.parameters.push((id, false, "return".into(), main.return_type));
             main.return_type = ast::Type::Unit;
 
-            let name = "_".into();
+            let name = "return".into();
             let typ = Self::convert_type(main_meta.return_type());
             let lhs = Box::new(ast::Expression::Ident(ast::Ident {
-                id,
                 mutable: false,
+                definition: Definition::Local(id),
                 location: None,
                 name,
                 typ,
             }));
-
             let rhs = Box::new(main.body);
             let operator = ast::BinaryOp::Equal;
             let eq = ast::Expression::Binary(ast::Binary { operator, lhs, rhs });
@@ -139,10 +169,7 @@ impl Monomorphiser {
 
     /// Monomorphise each parameter, expanding tuple/struct patterns into multiple parameters
     /// and binding any generic types found.
-    fn parameters(
-        &mut self,
-        params: Parameters,
-    ) -> Vec<(ast::DefinitionId, bool, String, ast::Type)> {
+    fn parameters(&mut self, params: Parameters) -> Vec<(ast::LocalId, bool, String, ast::Type)> {
         let mut new_params = Vec::with_capacity(params.len());
         for parameter in params {
             self.parameter(parameter.0, &parameter.1, &mut new_params);
@@ -154,12 +181,12 @@ impl Monomorphiser {
         &mut self,
         param: HirPattern,
         typ: &HirType,
-        new_params: &mut Vec<(ast::DefinitionId, bool, String, ast::Type)>,
+        new_params: &mut Vec<(ast::LocalId, bool, String, ast::Type)>,
     ) {
         match param {
             HirPattern::Identifier(ident) => {
                 //let value = self.expand_parameter(typ, new_params);
-                let new_id = self.next_definition_id();
+                let new_id = self.next_local_id();
                 let definition = self.interner.definition(ident.id);
                 let name = definition.name.clone();
                 new_params.push((new_id, definition.mutable, name, Self::convert_type(typ)));
@@ -194,7 +221,7 @@ impl Monomorphiser {
         use ast::Literal::*;
 
         match self.interner.expression(&expr) {
-            HirExpression::Ident(ident) => self.ident(ident),
+            HirExpression::Ident(ident) => self.ident(ident, expr),
             HirExpression::Literal(HirLiteral::Str(contents)) => Literal(Str(contents)),
             HirExpression::Literal(HirLiteral::Bool(value)) => Literal(Bool(value)),
             HirExpression::Literal(HirLiteral::Integer(value)) => {
@@ -241,7 +268,7 @@ impl Monomorphiser {
             HirExpression::For(for_expr) => {
                 let start = self.expr_infer(for_expr.start_range);
                 let end = self.expr_infer(for_expr.end_range);
-                let index_variable = self.next_definition_id();
+                let index_variable = self.next_local_id();
                 self.define_local(for_expr.identifier.id, index_variable);
 
                 let block = Box::new(self.expr_infer(for_expr.block));
@@ -308,12 +335,13 @@ impl Monomorphiser {
         let field_types = unwrap_struct_type(typ);
 
         // Create let bindings for each field value first to preserve evaluation order before
-        // they are reordered and packed into the resulting tuple
+        // they are reordered and packed into the resulting tuple.
+        // TODO: Is this necessary? Noir doesn't have any side effects currently.
         let mut field_vars = BTreeMap::new();
         let mut new_exprs = Vec::with_capacity(constructor.fields.len());
 
         for (field_name, expr_id) in constructor.fields {
-            let new_id = self.next_definition_id();
+            let new_id = self.next_local_id();
             let field_type = field_types.get(&field_name.0.contents).unwrap();
             let typ = Self::convert_type(field_type);
 
@@ -329,7 +357,14 @@ impl Monomorphiser {
         }
 
         let sorted_fields = vecmap(field_vars, |(name, (id, typ))| {
-            ast::Expression::Ident(ast::Ident { id, mutable: false, location: None, name, typ })
+            let definition = Definition::Local(id);
+            ast::Expression::Ident(ast::Ident {
+                definition,
+                mutable: false,
+                location: None,
+                name,
+                typ,
+            })
         });
 
         // Finally we can return the created Tuple from the new block
@@ -349,7 +384,7 @@ impl Monomorphiser {
     ) -> ast::Expression {
         match pattern {
             HirPattern::Identifier(ident) => {
-                let new_id = self.next_definition_id();
+                let new_id = self.next_local_id();
                 self.define_local(ident.id, new_id);
                 let definition = self.interner.definition(ident.id);
 
@@ -381,7 +416,7 @@ impl Monomorphiser {
         value: ast::Expression,
         fields: impl Iterator<Item = (HirPattern, HirType)>,
     ) -> ast::Expression {
-        let fresh_id = self.next_definition_id();
+        let fresh_id = self.next_local_id();
 
         let mut definitions = vec![ast::Expression::Let(ast::Let {
             id: fresh_id,
@@ -396,7 +431,7 @@ impl Monomorphiser {
             let new_rhs = ast::Expression::Ident(ast::Ident {
                 location: None,
                 mutable: false,
-                id: fresh_id,
+                definition: Definition::Local(fresh_id),
                 name,
                 typ,
             });
@@ -410,7 +445,7 @@ impl Monomorphiser {
 
     /// A local (ie non-global) ident only
     fn local_ident(&mut self, ident: &HirIdent) -> Option<ast::Ident> {
-        let id = self.lookup_local(ident.id)?;
+        let definition = self.lookup_local(ident.id)?;
         let definition = self.interner.definition(ident.id);
         let name = definition.name.clone();
         let typ = Self::convert_type(&self.interner.id_type(ident.id));
@@ -418,22 +453,28 @@ impl Monomorphiser {
         Some(ast::Ident {
             location: Some(ident.location),
             mutable: definition.mutable,
-            id,
+            definition,
             name,
             typ,
         })
     }
 
-    fn ident(&mut self, ident: HirIdent) -> ast::Expression {
-        match self.local_ident(&ident) {
-            Some(ident) => ast::Expression::Ident(ident),
-            None => {
-                // If it is not a predefined local, it must be a global that should be inlined
-                let definition = self.interner.definition(ident.id);
-                assert!(definition.is_global);
-                self.expr_infer(definition.rhs.unwrap())
+    fn ident(&mut self, ident: HirIdent, expr_id: node_interner::ExprId) -> ast::Expression {
+        let definition = match self.interner.definition(ident.id).definition {
+            node_interner::Definition::Local => self.lookup_local(ident.id),
+            node_interner::Definition::Function(func_id) => {
+                let typ = self.interner.id_type(expr_id);
+                self.lookup_function(func_id, expr_id, &typ)
             }
-        }
+            node_interner::Definition::Const(expr_id) => {
+                // If it is not a predefined local, it must be a global that should be inlined
+                return self.expr_infer(expr_id);
+            }
+        };
+
+        let name = self.interner.definition_name(ident.id).to_owned();
+        let typ = Self::convert_type(&self.interner.id_type(ident.id));
+        ast::Expression::Ident(ast::Ident { location: Some(ident.location), definition, name, typ })
     }
 
     /// Convert a non-tuple/struct type to a monomorphised type
@@ -490,49 +531,42 @@ impl Monomorphiser {
     fn function_call(
         &mut self,
         call: HirCallExpression,
-        expr_id: node_interner::ExprId,
+        id: node_interner::ExprId,
     ) -> ast::Expression {
-        let typ = self.interner.function_type(expr_id).follow_bindings();
+        let func = Box::new(self.expr_infer(call.func));
         let arguments = vecmap(&call.arguments, |id| self.expr_infer(*id));
-        let func_id = call.func_id;
+        let return_type = self.interner.id_type(id);
+        let typ = Self::convert_type(&return_type);
 
-        let meta = self.interner.function_meta(&func_id);
-        match meta.kind {
-            FunctionKind::LowLevel => {
-                let attribute = meta.attributes.expect("all low level functions must contain an attribute which contains the opcode which it links to");
-                let opcode = attribute.foreign().expect(
-                    "ice: function marked as foreign, but attribute kind does not match this",
-                );
-                ast::Expression::CallLowLevel(ast::CallLowLevel { opcode, arguments })
-            }
-            FunctionKind::Builtin => self.call_builtin(meta, arguments, call.arguments),
-            FunctionKind::Normal => {
-                let func_id = self
-                    .lookup_global(func_id, &typ)
-                    .unwrap_or_else(|| self.queue_function(func_id, expr_id, typ));
-
-                ast::Expression::Call(ast::Call { func_id, arguments })
-            }
-        }
+        self.try_evaluate_call(&func, &call.arguments).unwrap_or_else(|| {
+            ast::Expression::Call(ast::Call { func, arguments, return_type: typ })
+        })
     }
 
-    fn call_builtin(
+    /// Try to evaluate certain builtin functions (currently only 'arraylen')
+    /// at their callsite.
+    /// NOTE: Evaluating at the callsite means we cannot track aliased functions.
+    ///       E.g. `let f = std::array::len; f(arr)` will fail to evaluate.
+    ///       To fix this we need to evaluate on the identifier instead, which
+    ///       requires us to evaluate to a Lambda value which isn't in noir yet.
+    fn try_evaluate_call(
         &self,
-        meta: FuncMeta,
-        arguments: Vec<ast::Expression>,
-        arg_ids: Vec<node_interner::ExprId>,
-    ) -> ast::Expression {
-        let attribute = meta.attributes.expect("all builtin functions must contain an attribute which contains the function name which it links to");
-        let opcode = attribute
-            .builtin()
-            .expect("ice: function marked as a builtin, but attribute kind does not match this");
-
-        if opcode == "arraylen" {
-            let typ = self.interner.id_type(arg_ids[0]);
-            let len = typ.array_length().unwrap();
-            ast::Expression::Literal(ast::Literal::Integer((len as u128).into(), ast::Type::Field))
-        } else {
-            ast::Expression::CallBuiltin(ast::CallBuiltin { opcode, arguments })
+        func: &ast::Expression,
+        arguments: &[node_interner::ExprId],
+    ) -> Option<ast::Expression> {
+        match func {
+            ast::Expression::Ident(ident) => match &ident.definition {
+                Definition::Builtin(opcode) if opcode == "arraylen" => {
+                    let typ = self.interner.id_type(arguments[0]);
+                    let len = typ.array_length().unwrap();
+                    Some(ast::Expression::Literal(ast::Literal::Integer(
+                        (len as u128).into(),
+                        ast::Type::Field,
+                    )))
+                }
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -577,7 +611,7 @@ impl Monomorphiser {
 
     fn lvalue(&mut self, lvalue: HirLValue) -> ast::LValue {
         match lvalue {
-            HirLValue::Ident(ident) => ast::LValue::Ident(self.local_ident(&ident).unwrap()),
+            HirLValue::Ident(ident) => ast::LValue::Ident(self.local_ident(&ident)),
             HirLValue::MemberAccess { object, field_index, .. } => {
                 let object = Box::new(self.lvalue(*object));
                 ast::LValue::MemberAccess { object, field_index: field_index.unwrap() }

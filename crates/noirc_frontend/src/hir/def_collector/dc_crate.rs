@@ -222,7 +222,9 @@ fn collect_impls(
 
                 // .define_func_def(name, func_id);
                 for (_, method_id, method) in &unresolved.functions {
-                    let result = scope.define_func_def(method.name_ident().clone(), *method_id);
+                    let result =
+                        scope.define_func_def(method.name_ident().clone(), *method_id, interner);
+
                     if let Err((first_def, second_def)) = result {
                         let err =
                             DefCollectorErrorKind::DuplicateFunction { first_def, second_def };

@@ -77,18 +77,6 @@ impl From<SpannedToken> for Ident {
     }
 }
 
-impl From<Ident> for Expression {
-    fn from(i: Ident) -> Expression {
-        Expression { span: i.0.span(), kind: ExpressionKind::Ident(i.0.contents) }
-    }
-}
-
-impl From<Ident> for ExpressionKind {
-    fn from(i: Ident) -> ExpressionKind {
-        ExpressionKind::Ident(i.0.contents)
-    }
-}
-
 impl Ident {
     pub fn span(&self) -> Span {
         self.0.span()
@@ -230,6 +218,11 @@ impl Path {
     pub fn from_single(name: String, span: Span) -> Path {
         let segment = Ident::from(Spanned::from(span, name));
         Path { segments: vec![segment], kind: PathKind::Plain }
+    }
+
+    pub fn from_ident(ident: Ident) -> Path {
+        let span = ident.span();
+        Path::from_single(ident.0.contents, span)
     }
 
     pub fn span(&self) -> Span {

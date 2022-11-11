@@ -13,7 +13,7 @@ use crate::{token::Attribute, FunctionKind};
 #[derive(Debug, Clone)]
 pub struct HirFunction(ExprId);
 
-pub const MAIN_RETURN_NAME: &str = "return";
+const MAIN_RETURN_NAME: &str = "return";
 
 impl HirFunction {
     pub fn empty() -> HirFunction {

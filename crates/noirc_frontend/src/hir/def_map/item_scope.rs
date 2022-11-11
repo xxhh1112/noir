@@ -1,6 +1,6 @@
 use super::{namespace::PerNs, ModuleDefId, ModuleId};
 use crate::{
-    node_interner::{FuncId, StmtId, StructId},
+    node_interner::{Definition, FuncId, NodeInterner, StmtId, StructId},
     Ident,
 };
 use std::collections::{hash_map::Entry, HashMap};
@@ -49,7 +49,7 @@ impl ItemScope {
 
         match mod_def {
             ModuleDefId::ModuleId(_) => add_item(&mut self.types),
-            ModuleDefId::FunctionId(_) => add_item(&mut self.values),
+            ModuleDefId::VariableId(_) => add_item(&mut self.values),
             ModuleDefId::TypeId(_) => add_item(&mut self.types),
             ModuleDefId::GlobalId(_) => add_item(&mut self.values),
         }
@@ -63,8 +63,14 @@ impl ItemScope {
         self.add_definition(name, mod_id.into())
     }
 
-    pub fn define_func_def(&mut self, name: Ident, local_id: FuncId) -> Result<(), (Ident, Ident)> {
-        self.add_definition(name, local_id.into())
+    pub fn define_func_def(
+        &mut self,
+        name: Ident,
+        local_id: FuncId,
+        interner: &mut NodeInterner,
+    ) -> Result<(), (Ident, Ident)> {
+        let id = interner.push_function_definition(name.to_string(), local_id);
+        self.add_definition(name, ModuleDefId::VariableId(id))
     }
 
     pub fn define_struct_def(
@@ -86,13 +92,22 @@ impl ItemScope {
             _ => None,
         }
     }
-    pub fn find_func_with_name(&self, func_name: &Ident) -> Option<FuncId> {
+
+    pub fn find_func_with_name(
+        &self,
+        func_name: &Ident,
+        interner: &NodeInterner,
+    ) -> Option<FuncId> {
         let (module_def, _) = self.values.get(func_name)?;
         match module_def {
-            ModuleDefId::FunctionId(id) => Some(*id),
+            ModuleDefId::VariableId(id) => match interner.definition(*id).definition {
+                Definition::Function(id) => Some(id),
+                _ => None,
+            },
             _ => None,
         }
     }
+
     pub fn find_name(&self, name: &Ident) -> PerNs {
         PerNs { types: self.types.get(name).cloned(), values: self.values.get(name).cloned() }
     }

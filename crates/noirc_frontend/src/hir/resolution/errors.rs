@@ -2,7 +2,7 @@ use noirc_errors::CustomDiagnostic as Diagnostic;
 pub use noirc_errors::Span;
 use thiserror::Error;
 
-use crate::Ident;
+use crate::{Ident, Path};
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum ResolverError {
@@ -11,7 +11,7 @@ pub enum ResolverError {
     #[error("Unused variable")]
     UnusedVariable { ident: Ident },
     #[error("Could not find variable in this scope")]
-    VariableNotDeclared { name: String, span: Span },
+    VariableNotDeclared { path: Path },
     #[error("path is not an identifier")]
     PathIsNotIdent { span: Span },
     #[error("could not resolve path")]
@@ -67,11 +67,17 @@ impl ResolverError {
                 diag.add_note(message);
                 diag
             }
-            ResolverError::VariableNotDeclared { name, span } => Diagnostic::simple_error(
-                format!("cannot find `{}` in this scope ", name),
-                "not found in this scope".to_string(),
-                span,
-            ),
+            ResolverError::VariableNotDeclared { mut path } => {
+                let msg = if path.segments.len() > 1 {
+                    let last = path.last_segment();
+                    path.segments.pop();
+                    format!("No definition for `{}` defined in `{}`", last, path)
+                } else {
+                    format!("Cannot find `{}` in this scope", path)
+                };
+
+                Diagnostic::simple_error(msg, "Name not found in scope".to_string(), path.span())
+            }
             ResolverError::PathIsNotIdent { span } => Diagnostic::simple_error(
                 "cannot use path as an identifier".to_string(),
                 String::new(),

@@ -122,7 +122,7 @@ fn resolve_name_in_module(
         // In the type namespace, only Mod can be used in a path.
         let new_module_id = match typ {
             ModuleDefId::ModuleId(id) => id,
-            ModuleDefId::FunctionId(_) => panic!("functions cannot be in the type namespace"),
+            ModuleDefId::VariableId(_) => panic!("functions cannot be in the type namespace"),
             // TODO: If impls are ever implemented, types can be used in a path
             ModuleDefId::TypeId(id) => id.0,
             ModuleDefId::GlobalId(_) => panic!("globals cannot be in the type namespace"),
