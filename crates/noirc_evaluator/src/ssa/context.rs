@@ -109,17 +109,22 @@ impl SsaContext {
     #[allow(clippy::map_entry)]
     pub fn add_dummy_load(&mut self, a: ArrayId) {
         if !self.dummy_load.contains_key(&a) {
-            let op_a = Operation::Load { array_id: a, index: NodeId::dummy() };
+            let op_a = Operation::Load(Load::new(a, NodeId::dummy(), Location::dummy()));
             let dummy_load = node::Instruction::new(op_a, self.mem[a].element_type, None);
             let id = self.add_instruction(dummy_load);
             self.dummy_load.insert(a, id);
         }
     }
+
     #[allow(clippy::map_entry)]
     pub fn add_dummy_store(&mut self, a: ArrayId) {
         if !self.dummy_store.contains_key(&a) {
-            let op_a =
-                Operation::Store { array_id: a, index: NodeId::dummy(), value: NodeId::dummy() };
+            let op_a = Operation::Store(Store::new(
+                a,
+                NodeId::dummy(),
+                NodeId::dummy(),
+                Location::dummy(),
+            ));
             let dummy_store = node::Instruction::new(op_a, node::ObjectType::NotAnObject, None);
             let id = self.add_instruction(dummy_store);
             self.dummy_store.insert(a, id);
@@ -216,15 +221,15 @@ impl SsaContext {
                 let rhs = self.node_to_string(*rhs);
                 format!("cond({}) {}, {}", self.node_to_string(*condition), lhs, rhs)
             }
-            Operation::Load { array_id, index } => {
-                format!("load {:?}, index {}", array_id, self.node_to_string(*index))
+            Operation::Load(load) => {
+                format!("load {:?}, index {}", load.array_id, self.node_to_string(load.index))
             }
-            Operation::Store { array_id, index, value } => {
+            Operation::Store(store) => {
                 format!(
                     "store {:?}, index {}, value {}",
-                    array_id,
-                    self.node_to_string(*index),
-                    self.node_to_string(*value)
+                    store.array_id,
+                    self.node_to_string(store.index),
+                    self.node_to_string(store.value)
                 )
             }
             Operation::Intrinsic(opcode, args) => format!("intrinsic {}({})", opcode, join(args)),
@@ -751,9 +756,9 @@ impl SsaContext {
                     .get_or_create_const(FieldElement::from(i as i128), ObjectType::Unsigned(32));
                 let idx_a = self
                     .get_or_create_const(FieldElement::from(i as i128), ObjectType::Unsigned(32));
-                let op_b = Operation::Load { array_id: b, index: idx_b };
+                let op_b = Operation::Load(Load::new(b, idx_b, Location::dummy()));
                 let load = self.new_instruction(op_b, e_type)?;
-                let op_a = Operation::Store { array_id: a, index: idx_a, value: load };
+                let op_a = Operation::Store(Store::new(a, idx_a, load, Location::dummy()));
                 self.new_instruction(op_a, l_type)?;
             }
         } else {

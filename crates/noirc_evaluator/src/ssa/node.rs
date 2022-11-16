@@ -535,20 +535,46 @@ pub enum Operation {
         val_true: NodeId,
         val_false: NodeId,
     },
-
-    Load {
-        array_id: ArrayId,
-        index: NodeId,
-    },
-    Store {
-        array_id: ArrayId,
-        index: NodeId,
-        value: NodeId,
-    },
-
+    Load(Load),
+    Store(Store),
     Intrinsic(OPCODE, Vec<NodeId>), //Custom implementation of usefull primitives which are more performant with Aztec backend
 
     Nop, // no op
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Load {
+    pub array_id: ArrayId,
+    pub index: NodeId,
+    pub location: Option<Location>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Store {
+    pub array_id: ArrayId,
+    pub index: NodeId,
+    pub value: NodeId,
+    pub location: Option<Location>,
+}
+
+impl Load {
+    pub fn new(array_id: ArrayId, index: NodeId, location: Location) -> Self {
+        Self { array_id, index, location: Some(location) }
+    }
+
+    pub fn new_anon(array_id: ArrayId, index: NodeId) -> Self {
+        Self { array_id, index, location: None }
+    }
+}
+
+impl Store {
+    pub fn new(array_id: ArrayId, index: NodeId, value: NodeId, location: Location) -> Self {
+        Self { array_id, index, value, location: Some(location) }
+    }
+
+    pub fn new_anon(array_id: ArrayId, index: NodeId, value: NodeId) -> Self {
+        Self { array_id, index, value, location: None }
+    }
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq, Debug)]
@@ -1079,9 +1105,9 @@ impl Operation {
             Cond { condition, val_true: lhs, val_false: rhs } => {
                 Cond { condition: f(*condition), val_true: f(*lhs), val_false: f(*rhs) }
             }
-            Load { array_id: array, index } => Load { array_id: *array, index: f(*index) },
-            Store { array_id: array, index, value } => {
-                Store { array_id: *array, index: f(*index), value: f(*value) }
+            Load(load) => Load(Load::new(*array, f(*index), location)),
+            Store(store) => {
+                Store(Store::new(load.array_id, f(load.index), f(store.value), load.location))
             }
             Intrinsic(i, args) => Intrinsic(*i, vecmap(args.iter().copied(), f)),
             Nop => Nop,

@@ -58,11 +58,12 @@ pub fn seal_block(ctx: &mut SsaContext, block_id: BlockId) {
             u.extend(ctx[block].written_arrays(ctx));
         }
         for array in u {
-            let store = Operation::Store {
-                array_id: array,
-                index: NodeId::dummy(),
-                value: NodeId::dummy(),
-            };
+            let store = Operation::Store(Store::new(
+                array,
+                NodeId::dummy(),
+                NodeId::dummy(),
+                Location::dummy(),
+            ));
             let i = node::Instruction::new(store, node::ObjectType::NotAnObject, Some(block_id));
             ctx.insert_instruction_after_phi(i, block_id);
         }

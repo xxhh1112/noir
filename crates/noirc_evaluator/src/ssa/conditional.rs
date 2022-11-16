@@ -2,9 +2,9 @@ use num_bigint::BigUint;
 use num_traits::One;
 
 use crate::{
-    errors::RuntimeError,
+    errors::{RuntimeError, RuntimeErrorKind},
     ssa::{
-        node::{Mark, ObjectType},
+        node::{Mark, ObjectType, Load, Store},
         optim,
     },
 };
@@ -466,7 +466,7 @@ impl DecisionTree {
         ins_id: NodeId,
         predicate: AssumptionId,
         short_circtuit: bool,
-    ) -> bool {
+    ) -> Result<bool, RuntimeError> {
         let ass_cond;
         let ass_value;
         if predicate == AssumptionId::dummy() {
@@ -519,15 +519,13 @@ impl DecisionTree {
                     stack.push(ins_id);
                 }
 
-                Operation::Load { array_id, index } => {
-                    if let Some(idx) = ctx.get_as_constant(*index) {
-                        if (idx.to_u128() as u32) >= ctx.mem[*array_id].len {
+                Operation::Load(load) => {
+                    if let Some(idx) = ctx.get_as_constant(load.index) {
+                        if (idx.to_u128() as u32) >= ctx.mem[load.array_id].len {
                             if !DecisionTree::short_circuit(ctx, stack, ass_value) {
-                                unreachable!(
-                                    "index out of bounds: the len is {} but the index is {}",
-                                    ctx.mem[*array_id].len,
-                                    idx.to_u128()
-                                );
+                                let bound = ctx.mem[load.array_id].len as u128;
+                                let index = idx.to_u128();
+                                return RuntimeErrorKind::ArrayOutOfBounds { index, bound }.add_location(load.location);
                             }
                             return false;
                         }
@@ -562,25 +560,24 @@ impl DecisionTree {
                         _ => (),
                     }
                 }
-                Operation::Store { array_id, index, value } => {
+                Operation::Store(store) => {
                     if !ins.operation.is_dummy_store() {
-                        if let Some(idx) = ctx.get_as_constant(*index) {
-                            if (idx.to_u128() as u32) >= ctx.mem[*array_id].len {
+                        if let Some(idx) = ctx.get_as_constant(store.index) {
+                            if (idx.to_u128() as u32) >= ctx.mem[store.array_id].len {
                                 if !DecisionTree::short_circuit(ctx, stack, ass_value) {
-                                    unreachable!(
-                                        "index out of bounds: the len is {} but the index is {}",
-                                        ctx.mem[*array_id].len,
-                                        idx.to_u128()
-                                    );
+                                    let bound = ctx.mem[store.array_id].len as u128;
+                                    let index = idx.to_u128();
+                                    return RuntimeErrorKind::ArrayOutOfBounds { index, bound }.add_location(store.location);
                                 }
                                 return false;
                             }
                         }
-                        if stack.created_arrays[array_id] != stack.block
+                        if stack.created_arrays[store.array_id] != stack.block
                             && ctx.under_assumption(ass_value)
                         {
-                            let load = Operation::Load { array_id: *array_id, index: *index };
-                            let e_type = ctx.mem[*array_id].element_type;
+                            let load = Load::new(store.array_id, store.index, store.location);
+                            let load = Operation::Load(load);
+                            let e_type = ctx.mem[store.array_id].element_type;
                             let dummy = ctx.add_instruction(Instruction::new(
                                 load,
                                 e_type,
@@ -588,7 +585,7 @@ impl DecisionTree {
                             ));
                             let operation = Operation::Cond {
                                 condition: ass_value,
-                                val_true: *value,
+                                val_true: store.value,
                                 val_false: dummy,
                             };
                             let cond = ctx.add_instruction(Instruction::new(
@@ -601,11 +598,12 @@ impl DecisionTree {
                             stack.push(cond);
                             //store the conditional value
                             let ins2 = ctx.get_mut_instruction(ins_id);
-                            ins2.operation = Operation::Store {
-                                array_id: *array_id,
-                                index: *index,
-                                value: cond,
-                            };
+                            ins2.operation = Operation::Store(Store::new(
+                                store.array_id,
+                                store.index,
+                                cond,
+                                store.location,
+                            ));
                         }
                     }
                     stack.push(ins_id);
@@ -678,7 +676,7 @@ impl DecisionTree {
                         ins2.operation = Operation::Constrain(cond, *loc);
                         if ctx.is_zero(*expr) {
                             stack.push(ins_id);
-                            return false;
+                            return Ok(false);
                         }
                     }
                     stack.push(ins_id);
@@ -687,7 +685,7 @@ impl DecisionTree {
             }
         }
 
-        true
+        Ok(true)
     }
 
     fn synchronise(
@@ -785,23 +783,21 @@ impl DecisionTree {
                         predicate: self.root,
                     }
                 }
-                (
-                    Operation::Store { array_id: left_array, index: left_index, value: left_val },
-                    Operation::Store { value: right_val, .. },
-                ) => {
+                (Operation::Store(left), Operation::Store(right)) => {
                     let op = Operation::Cond {
                         condition: self[assumption.parent].condition,
-                        val_true: *left_val,
-                        val_false: *right_val,
+                        val_true: *left.value,
+                        val_false: *right.value,
                     };
                     let merge =
-                        Instruction::new(op, ctx.mem[*left_array].element_type, Some(block_id));
+                        Instruction::new(op, ctx.mem[left.array_id].element_type, Some(block_id));
                     to_merge.push(merge);
-                    Operation::Store {
-                        array_id: *left_array,
-                        index: *left_index,
-                        value: NodeId::dummy(),
-                    }
+                    Operation::Store(Store::new(
+                        left.array_id,
+                        left.index,
+                        NodeId::dummy(),
+                        left.location,
+                    ))
                 }
                 _ => unreachable!(),
             };
