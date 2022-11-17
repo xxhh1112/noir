@@ -163,8 +163,8 @@ impl IRGenerator {
         self.function_context = Some(index);
         self.context.functions.insert(func_id, func.clone());
 
-        let function_body = self.program.take_function_body(func_id);
-        let last_value = self.codegen_expression(env, &function_body)?;
+        let function_body = self.program[func_id].body;
+        let last_value = self.codegen_expression(env, function_body)?;
         let returned_values = last_value.to_node_ids();
 
         func.result_types.clear();
@@ -240,7 +240,7 @@ impl IRGenerator {
         let mut args: Vec<NodeId> = Vec::new();
 
         for arg in &call.arguments {
-            if let Ok(lhs) = self.codegen_expression(env, arg) {
+            if let Ok(lhs) = self.codegen_expression(env, *arg) {
                 args.push(lhs.unwrap_id()); //TODO handle multiple values
             } else {
                 panic!("error calling {}", op);

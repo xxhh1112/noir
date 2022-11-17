@@ -1,47 +1,52 @@
-use std::rc::Rc;
-
 use acvm::FieldElement;
 use noirc_abi::Abi;
 use noirc_errors::Location;
 
 use crate::{util::vecmap, BinaryOpKind, Signedness};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Expression {
     Ident(Ident),
     Literal(Literal),
-    Block(Vec<Expression>),
+    Block(Vec<ExprId>),
     Unary(Unary),
     Binary(Binary),
     Index(Index),
     Cast(Cast),
     For(For),
     If(If),
-    Tuple(Vec<Expression>),
-    ExtractTupleField(Box<Expression>, usize),
+    Tuple(Vec<ExprId>),
+    ExtractTupleField(ExprId, usize),
     Call(Call),
     CallBuiltin(CallBuiltin),
     CallLowLevel(CallLowLevel),
 
-    Shared(SharedId, Rc<Expression>),
     Let(Let),
-    Constrain(Box<Expression>, Location),
+    Constrain(ExprId, Location),
     Assign(Assign),
-    Semi(Box<Expression>),
+    Semi(ExprId),
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct SharedId(pub u32);
+impl ExprId {
+    pub fn display(self, program: &Program) -> ExprIdDisplay {
+        ExprIdDisplay(self, program)
+    }
+}
 
 impl Expression {
-    pub fn has_side_effects(&self) -> bool {
+    pub fn display<'a>(&'a self, program: &'a Program) -> ExpressionDisplay {
+        ExpressionDisplay(self, program)
+    }
+
+    pub fn has_side_effects(&self, program: &Program) -> bool {
         match self {
-            Expression::Block(exprs) => exprs.iter().any(|expr| expr.has_side_effects()),
-            Expression::Semi(expr) => expr.has_side_effects(),
-            Expression::Literal(Literal::Array(array)) => {
-                array.contents.iter().any(|elem| elem.has_side_effects())
+            Expression::Block(exprs) => {
+                exprs.iter().any(|expr| program[*expr].has_side_effects(program))
             }
-            Expression::Shared(_, expr) => expr.has_side_effects(),
+            Expression::Semi(expr) => program[*expr].has_side_effects(program),
+            Expression::Literal(Literal::Array(array)) => {
+                array.contents.iter().any(|elem| program[*elem].has_side_effects(program))
+            }
 
             Expression::Literal(_) => false,
             Expression::Ident(_) => false,
@@ -64,44 +69,56 @@ impl Expression {
         }
     }
 
-    pub fn contains_variables(&self) -> bool {
+    pub fn contains_variables(&self, program: &Program) -> bool {
         match self {
             Expression::Ident(_) => true,
             Expression::Literal(Literal::Array(array)) => {
-                array.contents.iter().any(|elem| elem.contains_variables())
+                array.contents.iter().any(|elem| program[*elem].contains_variables(program))
             }
             Expression::Literal(_) => false,
-            Expression::Block(exprs) => exprs.iter().any(|expr| expr.contains_variables()),
-            Expression::Unary(unary) => unary.rhs.contains_variables(),
+            Expression::Block(exprs) => {
+                exprs.iter().any(|expr| program[*expr].contains_variables(program))
+            }
+            Expression::Unary(unary) => program[unary.rhs].contains_variables(program),
             Expression::Binary(binary) => {
-                binary.lhs.contains_variables() || binary.rhs.contains_variables()
+                program[binary.lhs].contains_variables(program)
+                    || program[binary.rhs].contains_variables(program)
             }
             Expression::Index(index) => {
-                index.collection.contains_variables() || index.index.contains_variables()
+                program[index.collection].contains_variables(program)
+                    || program[index.index].contains_variables(program)
             }
-            Expression::Cast(cast) => cast.lhs.contains_variables(),
+            Expression::Cast(cast) => program[cast.lhs].contains_variables(program),
             Expression::For(for_loop) => {
-                for_loop.start_range.contains_variables() || for_loop.end_range.contains_variables()
+                program[for_loop.start_range].contains_variables(program)
+                    || program[for_loop.end_range].contains_variables(program)
+                    || program[for_loop.block].contains_variables(program)
             }
             Expression::If(if_expr) => {
-                if_expr.condition.contains_variables()
-                    || if_expr.consequence.contains_variables()
-                    || if_expr.alternative.as_ref().map_or(false, |alt| alt.contains_variables())
+                program[if_expr.condition].contains_variables(program)
+                    || program[if_expr.consequence].contains_variables(program)
+                    || if_expr
+                        .alternative
+                        .as_ref()
+                        .map_or(false, |alt| program[*alt].contains_variables(program))
             }
-            Expression::Tuple(fields) => fields.iter().any(|field| field.contains_variables()),
-            Expression::ExtractTupleField(expr, _) => expr.contains_variables(),
-            Expression::Call(call) => call.arguments.iter().any(|arg| arg.contains_variables()),
+            Expression::Tuple(fields) => {
+                fields.iter().any(|field| program[*field].contains_variables(program))
+            }
+            Expression::ExtractTupleField(expr, _) => program[*expr].contains_variables(program),
+            Expression::Call(call) => {
+                call.arguments.iter().any(|arg| program[*arg].contains_variables(program))
+            }
             Expression::CallBuiltin(call) => {
-                call.arguments.iter().any(|arg| arg.contains_variables())
+                call.arguments.iter().any(|arg| program[*arg].contains_variables(program))
             }
             Expression::CallLowLevel(call) => {
-                call.arguments.iter().any(|arg| arg.contains_variables())
+                call.arguments.iter().any(|arg| program[*arg].contains_variables(program))
             }
-            Expression::Shared(_, expr) => expr.contains_variables(),
-            Expression::Let(let_expr) => let_expr.expression.contains_variables(),
-            Expression::Constrain(expr, _) => expr.contains_variables(),
-            Expression::Assign(assign) => assign.expression.contains_variables(),
-            Expression::Semi(expr) => expr.contains_variables(),
+            Expression::Let(let_expr) => program[let_expr.expression].contains_variables(program),
+            Expression::Constrain(expr, _) => program[*expr].contains_variables(program),
+            Expression::Assign(assign) => program[assign.expression].contains_variables(program),
+            Expression::Semi(expr) => program[*expr].contains_variables(program),
         }
     }
 }
@@ -127,9 +144,9 @@ pub struct For {
     pub index_name: String,
     pub index_type: Type,
 
-    pub start_range: Box<Expression>,
-    pub end_range: Box<Expression>,
-    pub block: Box<Expression>,
+    pub start_range: ExprId,
+    pub end_range: ExprId,
+    pub block: ExprId,
     pub element_type: Type,
 }
 
@@ -145,61 +162,61 @@ pub enum Literal {
 #[derive(Debug, Clone)]
 pub struct Unary {
     pub operator: crate::UnaryOp,
-    pub rhs: Box<Expression>,
+    pub rhs: ExprId,
 }
 
 pub type BinaryOp = BinaryOpKind;
 
 #[derive(Debug, Clone)]
 pub struct Binary {
-    pub lhs: Box<Expression>,
+    pub lhs: ExprId,
     pub operator: BinaryOp,
-    pub rhs: Box<Expression>,
+    pub rhs: ExprId,
 }
 
 #[derive(Debug, Clone)]
 pub struct If {
-    pub condition: Box<Expression>,
-    pub consequence: Box<Expression>,
-    pub alternative: Option<Box<Expression>>,
+    pub condition: ExprId,
+    pub consequence: ExprId,
+    pub alternative: Option<ExprId>,
     pub typ: Type,
 }
 
 #[derive(Debug, Clone)]
 pub struct Cast {
-    pub lhs: Box<Expression>,
+    pub lhs: ExprId,
     pub r#type: Type,
 }
 
 #[derive(Debug, Clone)]
 pub struct ArrayLiteral {
-    pub contents: Vec<Expression>,
+    pub contents: Vec<ExprId>,
     pub element_type: Type,
 }
 
 #[derive(Debug, Clone)]
 pub struct Call {
     pub func_id: FuncId,
-    pub arguments: Vec<Expression>,
+    pub arguments: Vec<ExprId>,
 }
 
 #[derive(Debug, Clone)]
 pub struct CallLowLevel {
     pub opcode: String,
-    pub arguments: Vec<Expression>,
+    pub arguments: Vec<ExprId>,
 }
 
 /// TODO: Ssa doesn't support these yet.
 #[derive(Debug, Clone)]
 pub struct CallBuiltin {
     pub opcode: String,
-    pub arguments: Vec<Expression>,
+    pub arguments: Vec<ExprId>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Index {
-    pub collection: Box<Expression>,
-    pub index: Box<Expression>,
+    pub collection: ExprId,
+    pub index: ExprId,
 }
 
 #[derive(Debug, Clone)]
@@ -207,27 +224,27 @@ pub struct Let {
     pub id: DefinitionId,
     pub mutable: bool,
     pub name: String,
-    pub expression: Box<Expression>,
+    pub expression: ExprId,
 }
 
 #[derive(Debug, Clone)]
 pub struct Assign {
     pub lvalue: LValue,
-    pub expression: Box<Expression>,
+    pub expression: ExprId,
 }
 
 #[derive(Debug, Clone)]
 pub struct BinaryStatement {
-    pub lhs: Box<Expression>,
+    pub lhs: ExprId,
     pub r#type: Type,
-    pub expression: Box<Expression>,
+    pub expression: ExprId,
 }
 
 /// Represents an Ast form that can be assigned to
 #[derive(Debug, Clone)]
 pub enum LValue {
     Ident(Ident),
-    Index { array: Box<LValue>, index: Box<Expression> },
+    Index { array: Box<LValue>, index: ExprId },
     MemberAccess { object: Box<LValue>, field_index: usize },
 }
 
@@ -237,7 +254,7 @@ pub struct Function {
     pub name: String,
 
     pub parameters: Vec<(DefinitionId, /*mutable:*/ bool, /*name:*/ String, Type)>,
-    pub body: Expression,
+    pub body: ExprId,
 
     pub return_type: Type,
 }
@@ -262,14 +279,19 @@ impl Type {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct ExprId(u32);
+
 pub struct Program {
     pub functions: Vec<Function>,
     pub abi: Abi,
+
+    expressions: Vec<Expression>,
 }
 
 impl Program {
-    pub fn new(main: Function, abi: Abi) -> Program {
-        Program { functions: vec![main], abi }
+    pub fn new(abi: Abi) -> Program {
+        Program { functions: vec![], abi, expressions: vec![] }
     }
 
     pub fn push_function(&mut self, function: Function) {
@@ -284,16 +306,10 @@ impl Program {
         FuncId(0)
     }
 
-    pub fn take_main_body(&mut self) -> Expression {
-        self.take_function_body(FuncId(0))
-    }
-
-    /// Takes a function body by replacing it with `false` and
-    /// returning the previous value
-    pub fn take_function_body(&mut self, function: FuncId) -> Expression {
-        let main = &mut self.functions[function.0 as usize];
-        let replacement = Expression::Literal(Literal::Bool(false));
-        std::mem::replace(&mut main.body, replacement)
+    pub fn push_expression(&mut self, expr: Expression) -> ExprId {
+        let id = self.expressions.len();
+        self.expressions.push(expr);
+        ExprId(id as u32)
     }
 }
 
@@ -311,24 +327,41 @@ impl std::ops::IndexMut<FuncId> for Program {
     }
 }
 
+impl std::ops::Index<ExprId> for Program {
+    type Output = Expression;
+
+    fn index(&self, index: ExprId) -> &Self::Output {
+        &self.expressions[index.0 as usize]
+    }
+}
+
+impl std::ops::IndexMut<ExprId> for Program {
+    fn index_mut(&mut self, index: ExprId) -> &mut Self::Output {
+        &mut self.expressions[index.0 as usize]
+    }
+}
+
 impl std::fmt::Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for function in &self.functions {
-            super::printer::AstPrinter::default().print_function(function, f)?;
+            super::printer::AstPrinter::new(self).print_function(function, f)?;
         }
         Ok(())
     }
 }
 
-impl std::fmt::Display for Function {
+pub struct ExpressionDisplay<'a>(&'a Expression, &'a Program);
+pub struct ExprIdDisplay<'a>(ExprId, &'a Program);
+
+impl<'a> std::fmt::Display for ExpressionDisplay<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        super::printer::AstPrinter::default().print_function(self, f)
+        super::printer::AstPrinter::new(self.1).print_expr(self.0, f)
     }
 }
 
-impl std::fmt::Display for Expression {
+impl<'a> std::fmt::Display for ExprIdDisplay<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        super::printer::AstPrinter::default().print_expr(self, f)
+        super::printer::AstPrinter::new(self.1).print_expr_id(self.0, f)
     }
 }
 

@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
+use noirc_abi::Abi;
+
 use crate::{
     hir_def::{
         expr::*,
@@ -27,6 +29,7 @@ struct Monomorphiser {
     queue: VecDeque<(node_interner::FuncId, FuncId, TypeBindings)>,
 
     interner: NodeInterner,
+    program: Program,
 
     next_local_id: u32,
     next_function_id: u32,
@@ -35,27 +38,31 @@ struct Monomorphiser {
 type HirType = crate::Type;
 
 pub fn monomorphise(main: node_interner::FuncId, interner: NodeInterner) -> Program {
-    let mut monomorphiser = Monomorphiser::new(interner);
-    let mut functions = monomorphiser.compile_main(main);
+    let main_meta = interner.function_meta(&main);
+    let abi = main_meta.into_abi(&interner);
+
+    let mut monomorphiser = Monomorphiser::new(interner, abi);
+    monomorphiser.compile_main(main);
 
     while !monomorphiser.queue.is_empty() {
         let (next_fn_id, new_id, bindings) = monomorphiser.queue.pop_front().unwrap();
         monomorphiser.locals.clear();
 
         perform_instantiation_bindings(&bindings);
-        functions.push_function(monomorphiser.function(next_fn_id, new_id));
+        monomorphiser.function(next_fn_id, new_id);
         undo_instantiation_bindings(bindings);
     }
 
-    functions
+    monomorphiser.program
 }
 
 impl Monomorphiser {
-    fn new(interner: NodeInterner) -> Monomorphiser {
+    fn new(interner: NodeInterner, abi: Abi) -> Monomorphiser {
         Monomorphiser {
             globals: HashMap::new(),
             locals: HashMap::new(),
             queue: VecDeque::new(),
+            program: Program::new(abi),
             next_local_id: 0,
             next_function_id: 1,
             interner,
@@ -92,21 +99,27 @@ impl Monomorphiser {
         self.globals.entry(id).or_default().insert(typ, new_id);
     }
 
+    fn push_expr(&mut self, expression: ast::Expression) -> ast::ExprId {
+        self.program.push_expression(expression)
+    }
+
     /// The main function is special, we need to check for a return type and if present,
     /// insert an extra constrain on the return value.
-    fn compile_main(&mut self, main_id: node_interner::FuncId) -> Program {
-        let mut main = self.function(main_id, FuncId(0));
+    fn compile_main(&mut self, main_id: node_interner::FuncId) {
+        self.function(main_id, FuncId(0));
         let main_meta = self.interner.function_meta(&main_id);
 
+        let main = self.program.main();
         if main.return_type != ast::Type::Unit {
             let id = self.next_definition_id();
+            let main = self.program.main();
 
-            main.parameters.push((id, false, "return".into(), main.return_type));
+            main.parameters.push((id, false, "return".into(), main.return_type.clone()));
             main.return_type = ast::Type::Unit;
 
             let name = "_".into();
             let typ = Self::convert_type(main_meta.return_type());
-            let lhs = Box::new(ast::Expression::Ident(ast::Ident {
+            let lhs = self.push_expr(ast::Expression::Ident(ast::Ident {
                 id,
                 mutable: false,
                 location: None,
@@ -114,19 +127,17 @@ impl Monomorphiser {
                 typ,
             }));
 
-            let rhs = Box::new(main.body);
+            let rhs = self.program.main().body;
             let operator = ast::BinaryOp::Equal;
-            let eq = ast::Expression::Binary(ast::Binary { operator, lhs, rhs });
+            let eq = self.push_expr(ast::Expression::Binary(ast::Binary { operator, lhs, rhs }));
 
             let location = self.interner.function_meta(&main_id).location;
-            main.body = ast::Expression::Constrain(Box::new(eq), location);
+            let new_body = self.push_expr(ast::Expression::Constrain(eq, location));
+            self.program.main().body = new_body;
         }
-
-        let abi = main_meta.into_abi(&self.interner);
-        Program::new(main, abi)
     }
 
-    fn function(&mut self, f: node_interner::FuncId, id: FuncId) -> ast::Function {
+    fn function(&mut self, f: node_interner::FuncId, id: FuncId) {
         let meta = self.interner.function_meta(&f);
         let name = self.interner.function_name(&f).to_owned();
 
@@ -134,7 +145,8 @@ impl Monomorphiser {
         let parameters = self.parameters(meta.parameters);
         let body = self.expr_infer(*self.interner.function(&f).as_expr());
 
-        ast::Function { id, name, parameters, body, return_type }
+        let function = ast::Function { id, name, parameters, body, return_type };
+        self.program.push_function(function)
     }
 
     /// Monomorphise each parameter, expanding tuple/struct patterns into multiple parameters
@@ -184,17 +196,17 @@ impl Monomorphiser {
         }
     }
 
-    fn expr_infer(&mut self, expr: node_interner::ExprId) -> ast::Expression {
+    fn expr_infer(&mut self, expr: node_interner::ExprId) -> ast::ExprId {
         let expected_type = self.interner.id_type(expr);
         self.expr(expr, &expected_type)
     }
 
-    fn expr(&mut self, expr: node_interner::ExprId, typ: &HirType) -> ast::Expression {
+    fn expr(&mut self, expr: node_interner::ExprId, typ: &HirType) -> ast::ExprId {
         use ast::Expression::Literal;
         use ast::Literal::*;
 
-        match self.interner.expression(&expr) {
-            HirExpression::Ident(ident) => self.ident(ident),
+        let expr = match self.interner.expression(&expr) {
+            HirExpression::Ident(ident) => return self.ident(ident),
             HirExpression::Literal(HirLiteral::Str(contents)) => Literal(Str(contents)),
             HirExpression::Literal(HirLiteral::Bool(value)) => Literal(Bool(value)),
             HirExpression::Literal(HirLiteral::Integer(value)) => {
@@ -210,61 +222,61 @@ impl Monomorphiser {
 
             HirExpression::Prefix(prefix) => ast::Expression::Unary(ast::Unary {
                 operator: prefix.operator,
-                rhs: Box::new(self.expr_infer(prefix.rhs)),
+                rhs: self.expr_infer(prefix.rhs),
             }),
 
             HirExpression::Infix(infix) => {
-                let lhs = Box::new(self.expr_infer(infix.lhs));
-                let rhs = Box::new(self.expr_infer(infix.rhs));
+                let lhs = self.expr_infer(infix.lhs);
+                let rhs = self.expr_infer(infix.rhs);
                 let operator = infix.operator.kind;
                 ast::Expression::Binary(ast::Binary { lhs, rhs, operator })
             }
 
             HirExpression::Index(index) => ast::Expression::Index(ast::Index {
-                collection: Box::new(self.expr_infer(index.collection)),
-                index: Box::new(self.expr_infer(index.index)),
+                collection: self.expr_infer(index.collection),
+                index: self.expr_infer(index.index),
             }),
 
             HirExpression::MemberAccess(access) => {
                 let field_index = self.interner.get_field_index(expr);
-                let expr = Box::new(self.expr_infer(access.lhs));
+                let expr = self.expr_infer(access.lhs);
                 ast::Expression::ExtractTupleField(expr, field_index)
             }
 
             HirExpression::Call(call) => self.function_call(call, expr),
 
             HirExpression::Cast(cast) => ast::Expression::Cast(ast::Cast {
-                lhs: Box::new(self.expr_infer(cast.lhs)),
+                lhs: self.expr_infer(cast.lhs),
                 r#type: Self::convert_type(&cast.r#type),
             }),
 
             HirExpression::For(for_expr) => {
-                let start = self.expr_infer(for_expr.start_range);
-                let end = self.expr_infer(for_expr.end_range);
+                let start_range = self.expr_infer(for_expr.start_range);
+                let end_range = self.expr_infer(for_expr.end_range);
                 let index_variable = self.next_definition_id();
                 self.define_local(for_expr.identifier.id, index_variable);
 
-                let block = Box::new(self.expr_infer(for_expr.block));
+                let block = self.expr_infer(for_expr.block);
 
                 ast::Expression::For(ast::For {
                     index_variable,
                     index_name: self.interner.definition_name(for_expr.identifier.id).to_owned(),
                     index_type: Self::convert_type(&self.interner.id_type(for_expr.start_range)),
-                    start_range: Box::new(start),
-                    end_range: Box::new(end),
+                    start_range,
+                    end_range,
                     element_type: unwrap_array_element_type(&self.interner.id_type(expr)),
                     block,
                 })
             }
 
             HirExpression::If(if_expr) => {
-                let cond = self.expr(if_expr.condition, &HirType::Bool(Comptime::No(None)));
-                let then = self.expr(if_expr.consequence, typ);
-                let else_ = if_expr.alternative.map(|alt| Box::new(self.expr(alt, typ)));
+                let condition = self.expr(if_expr.condition, &HirType::Bool(Comptime::No(None)));
+                let consequence = self.expr(if_expr.consequence, typ);
+                let alternative = if_expr.alternative.map(|alt| self.expr(alt, typ));
                 ast::Expression::If(ast::If {
-                    condition: Box::new(cond),
-                    consequence: Box::new(then),
-                    alternative: else_,
+                    condition,
+                    consequence,
+                    alternative,
                     typ: Self::convert_type(&self.interner.id_type(expr)),
                 })
             }
@@ -276,22 +288,25 @@ impl Monomorphiser {
             HirExpression::Constructor(constructor) => self.constructor(constructor, typ),
 
             HirExpression::MethodCall(_) | HirExpression::Error => unreachable!(),
-        }
+        };
+
+        self.push_expr(expr)
     }
 
-    fn statement(&mut self, id: StmtId) -> ast::Expression {
-        match self.interner.statement(&id) {
+    fn statement(&mut self, id: StmtId) -> ast::ExprId {
+        let expr = match self.interner.statement(&id) {
             HirStatement::Let(let_statement) => self.let_statement(let_statement),
             HirStatement::Constrain(constrain) => {
                 let expr = self.expr(constrain.0, &HirType::Bool(Comptime::No(None)));
                 let location = self.interner.expr_location(&constrain.0);
-                ast::Expression::Constrain(Box::new(expr), location)
+                ast::Expression::Constrain(expr, location)
             }
             HirStatement::Assign(assign) => self.assign(assign),
-            HirStatement::Expression(expr) => self.expr_infer(expr),
-            HirStatement::Semi(expr) => ast::Expression::Semi(Box::new(self.expr_infer(expr))),
+            HirStatement::Expression(expr) => return self.expr_infer(expr),
+            HirStatement::Semi(expr) => ast::Expression::Semi(self.expr_infer(expr)),
             HirStatement::Error => unreachable!(),
-        }
+        };
+        self.push_expr(expr)
     }
 
     fn let_statement(&mut self, let_statement: HirLetStatement) -> ast::Expression {
@@ -318,22 +333,23 @@ impl Monomorphiser {
             let typ = Self::convert_type(field_type);
 
             field_vars.insert(field_name.0.contents.clone(), (new_id, typ));
-            let expression = Box::new(self.expr(expr_id, field_type));
+            let expression = self.expr(expr_id, field_type);
 
-            new_exprs.push(ast::Expression::Let(ast::Let {
+            new_exprs.push(self.push_expr(ast::Expression::Let(ast::Let {
                 id: new_id,
                 mutable: false,
                 name: field_name.0.contents,
                 expression,
-            }));
+            })));
         }
 
         let sorted_fields = vecmap(field_vars, |(name, (id, typ))| {
-            ast::Expression::Ident(ast::Ident { id, mutable: false, location: None, name, typ })
+            let ident = ast::Ident { id, mutable: false, location: None, name, typ };
+            self.push_expr(ast::Expression::Ident(ident))
         });
 
         // Finally we can return the created Tuple from the new block
-        new_exprs.push(ast::Expression::Tuple(sorted_fields));
+        new_exprs.push(self.push_expr(ast::Expression::Tuple(sorted_fields)));
         ast::Expression::Block(new_exprs)
     }
 
@@ -344,7 +360,7 @@ impl Monomorphiser {
     fn unpack_pattern(
         &mut self,
         pattern: HirPattern,
-        value: ast::Expression,
+        value: ast::ExprId,
         typ: &HirType,
     ) -> ast::Expression {
         match pattern {
@@ -357,7 +373,7 @@ impl Monomorphiser {
                     id: new_id,
                     mutable: definition.mutable,
                     name: definition.name.clone(),
-                    expression: Box::new(value),
+                    expression: value,
                 })
             }
             HirPattern::Mutable(pattern, _) => self.unpack_pattern(*pattern, value, typ),
@@ -378,31 +394,31 @@ impl Monomorphiser {
 
     fn unpack_tuple_pattern(
         &mut self,
-        value: ast::Expression,
+        value: ast::ExprId,
         fields: impl Iterator<Item = (HirPattern, HirType)>,
     ) -> ast::Expression {
         let fresh_id = self.next_definition_id();
 
-        let mut definitions = vec![ast::Expression::Let(ast::Let {
+        let mut definitions = vec![self.push_expr(ast::Expression::Let(ast::Let {
             id: fresh_id,
             mutable: false,
             name: "_".into(),
-            expression: Box::new(value),
-        })];
+            expression: value,
+        }))];
 
         for (i, (field_pattern, field_type)) in fields.into_iter().enumerate() {
             let typ = Self::convert_type(&field_type);
             let name = i.to_string();
-            let new_rhs = ast::Expression::Ident(ast::Ident {
+            let new_rhs = self.push_expr(ast::Expression::Ident(ast::Ident {
                 location: None,
                 mutable: false,
                 id: fresh_id,
                 name,
                 typ,
-            });
-            let new_rhs = ast::Expression::ExtractTupleField(Box::new(new_rhs), i);
+            }));
+            let new_rhs = self.push_expr(ast::Expression::ExtractTupleField(new_rhs, i));
             let new_expr = self.unpack_pattern(field_pattern, new_rhs, &field_type);
-            definitions.push(new_expr);
+            definitions.push(self.push_expr(new_expr));
         }
 
         ast::Expression::Block(definitions)
@@ -424,9 +440,9 @@ impl Monomorphiser {
         })
     }
 
-    fn ident(&mut self, ident: HirIdent) -> ast::Expression {
+    fn ident(&mut self, ident: HirIdent) -> ast::ExprId {
         match self.local_ident(&ident) {
-            Some(ident) => ast::Expression::Ident(ident),
+            Some(ident) => self.push_expr(ast::Expression::Ident(ident)),
             None => {
                 // If it is not a predefined local, it must be a global that should be inlined
                 let definition = self.interner.definition(ident.id);
@@ -519,7 +535,7 @@ impl Monomorphiser {
     fn call_builtin(
         &self,
         meta: FuncMeta,
-        arguments: Vec<ast::Expression>,
+        arguments: Vec<ast::ExprId>,
         arg_ids: Vec<node_interner::ExprId>,
     ) -> ast::Expression {
         let attribute = meta.attributes.expect("all builtin functions must contain an attribute which contains the function name which it links to");
@@ -570,7 +586,7 @@ impl Monomorphiser {
     }
 
     fn assign(&mut self, assign: HirAssignStatement) -> ast::Expression {
-        let expression = Box::new(self.expr_infer(assign.expression));
+        let expression = self.expr_infer(assign.expression);
         let lvalue = self.lvalue(assign.lvalue);
         ast::Expression::Assign(ast::Assign { lvalue, expression })
     }
@@ -584,7 +600,7 @@ impl Monomorphiser {
             }
             HirLValue::Index { array, index } => {
                 let array = Box::new(self.lvalue(*array));
-                let index = Box::new(self.expr_infer(index));
+                let index = self.expr_infer(index);
                 ast::LValue::Index { array, index }
             }
         }

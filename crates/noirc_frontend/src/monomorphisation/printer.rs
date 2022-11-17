@@ -2,14 +2,18 @@ use std::fmt::Formatter;
 
 use crate::util::vecmap;
 
-use super::ast::{Expression, Function, LValue};
+use super::ast::{ExprId, Expression, Function, LValue, Program};
 
-#[derive(Default)]
-pub struct AstPrinter {
+pub struct AstPrinter<'a> {
     indent_level: u32,
+    program: &'a Program,
 }
 
-impl AstPrinter {
+impl<'a> AstPrinter<'a> {
+    pub fn new(program: &'a Program) -> Self {
+        Self { indent_level: 0, program }
+    }
+
     pub fn print_function(&mut self, function: &Function, f: &mut Formatter) -> std::fmt::Result {
         let params = vecmap(&function.parameters, |(id, mutable, name, typ)| {
             format!("{}{}${}: {}", if *mutable { "mut " } else { "" }, name, id.0, typ)
@@ -22,10 +26,15 @@ impl AstPrinter {
             function.name, function.id.0, params, function.return_type
         )?;
         self.indent_level += 1;
-        self.print_expr_expect_block(&function.body, f)?;
+        self.print_expr_expect_block(function.body, f)?;
         self.indent_level -= 1;
         self.next_line(f)?;
         writeln!(f, "}}")
+    }
+
+    pub fn print_expr_id(&mut self, expr: ExprId, f: &mut Formatter) -> std::fmt::Result {
+        let expr = &self.program[expr];
+        self.print_expr(expr, f)
     }
 
     pub fn print_expr(&mut self, expr: &Expression, f: &mut Formatter) -> std::fmt::Result {
@@ -35,23 +44,22 @@ impl AstPrinter {
             Expression::Block(exprs) => self.print_block(exprs, f),
             Expression::Unary(unary) => self.print_unary(unary, f),
             Expression::Binary(binary) => self.print_binary(binary, f),
-            Expression::Shared(_, e) => self.print_expr(e, f),
             Expression::Index(index) => {
-                self.print_expr(&index.collection, f)?;
+                self.print_expr_id(index.collection, f)?;
                 write!(f, "[")?;
-                self.print_expr(&index.index, f)?;
+                self.print_expr_id(index.index, f)?;
                 write!(f, "]")
             }
             Expression::Cast(cast) => {
                 write!(f, "(")?;
-                self.print_expr(&cast.lhs, f)?;
+                self.print_expr_id(cast.lhs, f)?;
                 write!(f, " as {})", cast.r#type)
             }
             Expression::For(for_expr) => self.print_for(for_expr, f),
             Expression::If(if_expr) => self.print_if(if_expr, f),
             Expression::Tuple(tuple) => self.print_tuple(tuple, f),
             Expression::ExtractTupleField(expr, index) => {
-                self.print_expr(expr, f)?;
+                self.print_expr_id(*expr, f)?;
                 write!(f, ".{}", index)
             }
             Expression::Call(call) => self.print_call(call, f),
@@ -59,19 +67,19 @@ impl AstPrinter {
             Expression::CallLowLevel(call) => self.print_builtin(call, f),
             Expression::Let(let_expr) => {
                 write!(f, "let {}${} = ", let_expr.name, let_expr.id.0)?;
-                self.print_expr(&let_expr.expression, f)
+                self.print_expr_id(let_expr.expression, f)
             }
             Expression::Constrain(expr, _) => {
                 write!(f, "constrain ")?;
-                self.print_expr(expr, f)
+                self.print_expr_id(*expr, f)
             }
             Expression::Assign(assign) => {
                 self.print_lvalue(&assign.lvalue, f)?;
                 write!(f, " = ")?;
-                self.print_expr(&assign.expression, f)
+                self.print_expr_id(assign.expression, f)
             }
             Expression::Semi(expr) => {
-                self.print_expr(expr, f)?;
+                self.print_expr_id(*expr, f)?;
                 write!(f, ";")
             }
         }
@@ -103,11 +111,7 @@ impl AstPrinter {
         }
     }
 
-    fn print_block(
-        &mut self,
-        exprs: &[Expression],
-        f: &mut Formatter,
-    ) -> Result<(), std::fmt::Error> {
+    fn print_block(&mut self, exprs: &[ExprId], f: &mut Formatter) -> Result<(), std::fmt::Error> {
         if exprs.is_empty() {
             write!(f, "{{}}")
         } else {
@@ -115,7 +119,7 @@ impl AstPrinter {
             self.indent_level += 1;
             for (i, expr) in exprs.iter().enumerate() {
                 self.next_line(f)?;
-                self.print_expr(expr, f)?;
+                self.print_expr_id(*expr, f)?;
 
                 if i != exprs.len() - 1 {
                     write!(f, ";")?;
@@ -130,16 +134,13 @@ impl AstPrinter {
     /// Print an expression, but expect that we've already printed a {} block, so don't print
     /// out those twice. Also decrements the current indent level and prints out the next line when
     /// finished.
-    fn print_expr_expect_block(
-        &mut self,
-        expr: &Expression,
-        f: &mut Formatter,
-    ) -> std::fmt::Result {
+    fn print_expr_expect_block(&mut self, expr_id: ExprId, f: &mut Formatter) -> std::fmt::Result {
+        let expr = &self.program[expr_id];
         match expr {
             Expression::Block(exprs) => {
                 for (i, expr) in exprs.iter().enumerate() {
                     self.next_line(f)?;
-                    self.print_expr(expr, f)?;
+                    self.print_expr_id(*expr, f)?;
 
                     if i != exprs.len() - 1 {
                         write!(f, ";")?;
@@ -147,9 +148,9 @@ impl AstPrinter {
                 }
                 Ok(())
             }
-            other => {
+            _ => {
                 self.next_line(f)?;
-                self.print_expr(other, f)
+                self.print_expr_id(expr_id, f)
             }
         }
     }
@@ -160,7 +161,7 @@ impl AstPrinter {
         f: &mut Formatter,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "({}", unary.operator)?;
-        self.print_expr(&unary.rhs, f)?;
+        self.print_expr_id(unary.rhs, f)?;
         write!(f, ")")
     }
 
@@ -170,9 +171,9 @@ impl AstPrinter {
         f: &mut Formatter,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "(")?;
-        self.print_expr(&binary.lhs, f)?;
+        self.print_expr_id(binary.lhs, f)?;
         write!(f, " {} ", binary.operator)?;
-        self.print_expr(&binary.rhs, f)?;
+        self.print_expr_id(binary.rhs, f)?;
         write!(f, ")")
     }
 
@@ -182,13 +183,13 @@ impl AstPrinter {
         f: &mut Formatter,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "for {}${} in ", for_expr.index_name, for_expr.index_variable.0)?;
-        self.print_expr(&for_expr.start_range, f)?;
+        self.print_expr_id(for_expr.start_range, f)?;
         write!(f, " .. ")?;
-        self.print_expr(&for_expr.end_range, f)?;
+        self.print_expr_id(for_expr.end_range, f)?;
         write!(f, " {{")?;
 
         self.indent_level += 1;
-        self.print_expr_expect_block(&for_expr.block, f)?;
+        self.print_expr_expect_block(for_expr.block, f)?;
         self.indent_level -= 1;
         self.next_line(f)?;
         write!(f, "}}")
@@ -200,15 +201,15 @@ impl AstPrinter {
         f: &mut Formatter,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "if ")?;
-        self.print_expr(&if_expr.condition, f)?;
+        self.print_expr_id(if_expr.condition, f)?;
 
         write!(f, " {{")?;
         self.indent_level += 1;
-        self.print_expr_expect_block(&if_expr.consequence, f)?;
+        self.print_expr_expect_block(if_expr.consequence, f)?;
         self.indent_level -= 1;
         self.next_line(f)?;
 
-        if let Some(alt) = &if_expr.alternative {
+        if let Some(alt) = if_expr.alternative {
             write!(f, "}} else {{")?;
             self.indent_level += 1;
             self.print_expr_expect_block(alt, f)?;
@@ -218,13 +219,9 @@ impl AstPrinter {
         write!(f, "}}")
     }
 
-    fn print_comma_separated(
-        &mut self,
-        exprs: &[Expression],
-        f: &mut Formatter,
-    ) -> std::fmt::Result {
+    fn print_comma_separated(&mut self, exprs: &[ExprId], f: &mut Formatter) -> std::fmt::Result {
         for (i, elem) in exprs.iter().enumerate() {
-            self.print_expr(elem, f)?;
+            self.print_expr_id(*elem, f)?;
             if i != exprs.len() - 1 {
                 write!(f, ", ")?;
             }
@@ -232,11 +229,7 @@ impl AstPrinter {
         Ok(())
     }
 
-    fn print_tuple(
-        &mut self,
-        tuple: &[Expression],
-        f: &mut Formatter,
-    ) -> Result<(), std::fmt::Error> {
+    fn print_tuple(&mut self, tuple: &[ExprId], f: &mut Formatter) -> Result<(), std::fmt::Error> {
         write!(f, "(")?;
         self.print_comma_separated(tuple, f)?;
         write!(f, ")")
@@ -278,7 +271,7 @@ impl AstPrinter {
             LValue::Index { array, index } => {
                 self.print_lvalue(array, f)?;
                 write!(f, "[")?;
-                self.print_expr(index, f)?;
+                self.print_expr_id(*index, f)?;
                 write!(f, "]")
             }
             LValue::MemberAccess { object, field_index } => {
