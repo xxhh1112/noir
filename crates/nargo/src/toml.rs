@@ -1,10 +1,10 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::errors::CliError;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub package: Package,
     pub dependencies: BTreeMap<String, Dependency>,
@@ -25,7 +25,7 @@ impl Config {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Package {
     // Note: a package name is not needed unless there is a registry
     pub authors: Vec<String>,
@@ -39,7 +39,18 @@ pub struct Package {
     pub license: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+impl Default for Package {
+    fn default() -> Self {
+        Self {
+            authors: Default::default(),
+            compiler_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            backend: Default::default(),
+            license: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(untagged)]
 /// Enum representing the different types of ways to
 /// supply a source for the dependency
@@ -93,5 +104,6 @@ fn parse_standard_toml() {
         hello = {path = "./noir_driver"}
     "#;
 
-    assert!(parse_toml_str(src).is_ok());
+    let parsed_config: Result<Config, _> = toml::from_str(src);
+    assert!(parsed_config.is_ok());
 }

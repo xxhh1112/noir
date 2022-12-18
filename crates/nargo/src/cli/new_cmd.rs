@@ -1,12 +1,14 @@
+use clap::Args;
+use std::path::{Path, PathBuf};
+
 use crate::{
     constants::{PKG_FILE, SRC_DIR},
     errors::CliError,
+    toml::Config,
 };
 
 use super::fs::{create_named_dir, write_to_file};
 use super::NargoConfig;
-use clap::Args;
-use std::path::{Path, PathBuf};
 
 /// Create a new binary project
 #[derive(Debug, Clone, Args)]
@@ -31,15 +33,9 @@ pub(crate) fn run(args: NewCommand, config: NargoConfig) -> Result<(), CliError>
     const EXAMPLE: &str =
         concat!("fn main(x : Field, y : pub Field) {\n", "    constrain x != y;\n", "}");
 
-    const SETTINGS: &str = concat!(
-        "[package]\n",
-        "authors = [\"\"]\n",
-        "compiler_version = \"0.1\"\n",
-        "\n",
-        "[dependencies]"
-    );
+    let settings = toml::to_string(&Config::default()).unwrap();
 
-    write_to_file(SETTINGS.as_bytes(), &package_dir.join(Path::new(PKG_FILE)));
+    write_to_file(settings.as_bytes(), &package_dir.join(Path::new(PKG_FILE)));
     write_to_file(EXAMPLE.as_bytes(), &src_dir.join(Path::new("main.nr")));
     println!("Project successfully created! Binary located at {}", package_dir.display());
     Ok(())
