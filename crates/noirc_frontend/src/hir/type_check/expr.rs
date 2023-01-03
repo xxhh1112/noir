@@ -70,9 +70,7 @@ pub(crate) fn type_check_expression(
                         Shared::new(TypeBinding::Unbound(id)),
                     )
                 }
-                HirLiteral::Str(_) => unimplemented!(
-                    "[Coming Soon] : Currently string literal types have not been implemented"
-                ),
+                HirLiteral::Str(_) => Type::String,
             }
         }
         HirExpression::Infix(infix_expr) => {

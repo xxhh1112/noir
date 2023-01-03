@@ -196,6 +196,7 @@ pub enum Type {
     PolymorphicInteger(Comptime, TypeVariable),
     Bool(Comptime),
     Unit,
+    String,
     Struct(Shared<StructType>, Vec<Type>),
     Tuple(Vec<Type>),
     TypeVariable(TypeVariable),
@@ -480,6 +481,7 @@ impl std::fmt::Display for Type {
             }
             Type::Bool(comptime) => write!(f, "{}bool", comptime),
             Type::Unit => write!(f, "()"),
+            Type::String => write!(f, "str"),
             Type::Error => write!(f, "error"),
             Type::TypeVariable(id) => write!(f, "{}", id.borrow()),
             Type::NamedGeneric(binding, name) => match &*binding.borrow() {
@@ -962,6 +964,7 @@ impl Type {
                 TypeBinding::Unbound(_) => Type::default_int_type(None).as_abi_type(),
             },
             Type::Bool(_) => AbiType::Integer { sign: noirc_abi::Sign::Unsigned, width: 1 },
+            Type::String => AbiType::String,
             Type::Error => unreachable!(),
             Type::Unit => unreachable!(),
             Type::ArrayLength(_) => unreachable!(),
