@@ -193,15 +193,16 @@ pub enum Type {
     FieldElement(Comptime),
     Array(Box<Type>, Box<Type>),        // Array(4, Field) = [Field; 4]
     Integer(Comptime, Signedness, u32), // u32 = Integer(unsigned, 32)
-    PolymorphicInteger(Comptime, TypeVariable),
+
     Bool(Comptime),
     Unit,
     Struct(Shared<StructType>, Vec<Type>),
     Tuple(Vec<Type>),
-    TypeVariable(TypeVariable),
 
-    /// NamedGenerics are the 'T' or 'U' in a user-defined generic function
-    /// like `fn foo<T, U>(...) {}`. Unlike TypeVariables, they cannot be bound over.
+    TypeVariable(TypeVariable, TypeVariableKind),
+
+    /// NamedGenerics are the 'T' or 'U' in a user-defined generic function such as
+    /// `fn foo<T, U>(...) {}`. Unlike TypeVariables, they cannot be bound over.
     NamedGeneric(TypeVariable, Rc<String>),
 
     /// A functions with arguments, and a return type.
@@ -231,6 +232,19 @@ pub enum TypeBinding {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct TypeVariableId(pub usize);
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub enum TypeVariableKind {
+    Any,
+
+    /// Any integer or field type. These are created from polymorphic literals like `6`
+    /// in the code as they can later be resolved to any of these types.
+    IntOrField(Comptime),
+
+    /// Any integer type. These are usually created when bitwise operators are used on
+    /// another type variable since bitwise operators disallow the Field type.
+    Int(Comptime),
+}
 
 #[derive(Debug, Clone, Eq)]
 pub enum Comptime {
@@ -424,6 +438,25 @@ impl Comptime {
     }
 }
 
+impl TypeVariableKind {
+    fn set_span(&mut self, new_span: Span) {
+        match self {
+            TypeVariableKind::Any => (),
+            TypeVariableKind::IntOrField(comptime) => comptime.set_span(new_span),
+            TypeVariableKind::Int(comptime) => comptime.set_span(new_span),
+        }
+    }
+
+    fn get_comptime(&self) -> Option<Comptime> {
+        match self {
+            TypeVariableKind::Any => None,
+            TypeVariableKind::IntOrField(comptime) | TypeVariableKind::Int(comptime) => {
+                Some(comptime.clone())
+            }
+        }
+    }
+}
+
 impl Type {
     pub fn field(span: Option<Span>) -> Type {
         Type::FieldElement(Comptime::No(span))
@@ -433,12 +466,19 @@ impl Type {
         Type::FieldElement(Comptime::Yes(span))
     }
 
-    pub fn default_int_type(span: Option<Span>) -> Type {
+    /// The type to default a Type::PolymorphicIntOrField to
+    pub fn default_int_or_field_type(span: Option<Span>) -> Type {
         Type::field(span)
     }
 
-    pub fn type_variable(id: TypeVariableId) -> Type {
-        Type::TypeVariable(Shared::new(TypeBinding::Unbound(id)))
+    /// The type to default a Type::PolymorphicInt to.
+    /// The choice of i64 here is completely arbitrary.
+    pub fn default_int_type(span: Option<Span>) -> Type {
+        Type::Integer(Comptime::No(span), Signedness::Signed, 64)
+    }
+
+    pub fn type_variable(id: TypeVariableId, kind: TypeVariableKind) -> Type {
+        Type::TypeVariable(Shared::new(TypeBinding::Unbound(id)), kind)
     }
 }
 
@@ -456,16 +496,6 @@ impl std::fmt::Display for Type {
                 Signedness::Signed => write!(f, "{comptime}i{num_bits}"),
                 Signedness::Unsigned => write!(f, "{comptime}u{num_bits}"),
             },
-            Type::PolymorphicInteger(_, binding) => {
-                if let TypeBinding::Unbound(_) = &*binding.borrow() {
-                    // Show a Field by default if this PolymorphicInteger is unbound, since that is
-                    // what they bind to by default anyway. It is less confusing than displaying it
-                    // as a generic.
-                    write!(f, "Field")
-                } else {
-                    write!(f, "{}", binding.borrow())
-                }
-            }
             Type::Struct(s, args) => {
                 let args = vecmap(args, |arg| arg.to_string());
                 if args.is_empty() {
@@ -481,12 +511,20 @@ impl std::fmt::Display for Type {
             Type::Bool(comptime) => write!(f, "{comptime}bool"),
             Type::Unit => write!(f, "()"),
             Type::Error => write!(f, "error"),
-            Type::TypeVariable(id) => write!(f, "{}", id.borrow()),
-            Type::NamedGeneric(binding, name) => match &*binding.borrow() {
-                TypeBinding::Bound(binding) => binding.fmt(f),
-                TypeBinding::Unbound(_) if name.is_empty() => write!(f, "_"),
-                TypeBinding::Unbound(_) => write!(f, "{name}"),
-            },
+            Type::TypeVariable(binding, kind) => {
+                if let TypeBinding::Unbound(_) = &*binding.borrow() {
+                    kind.fmt(f)
+                } else {
+                    write!(f, "{}", binding.borrow())
+                }
+            }
+            Type::NamedGeneric(binding, name) => {
+                if let TypeBinding::Unbound(_) = &*binding.borrow() {
+                    write!(f, "{name}")
+                } else {
+                    write!(f, "{}", binding.borrow())
+                }
+            }
             Type::ArrayLength(n) => n.fmt(f),
             Type::Forall(typevars, typ) => {
                 let typevars = vecmap(typevars, |(var, _)| var.to_string());
@@ -515,6 +553,16 @@ impl std::fmt::Display for TypeBinding {
     }
 }
 
+impl std::fmt::Display for TypeVariableKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeVariableKind::Any => write!(f, "_"),
+            TypeVariableKind::IntOrField(_) => Type::default_int_or_field_type(None).fmt(f),
+            TypeVariableKind::Int(_) => Type::default_int_type(None).fmt(f),
+        }
+    }
+}
+
 impl std::fmt::Display for Comptime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -537,11 +585,15 @@ impl Type {
             Type::FieldElement(comptime) | Type::Integer(comptime, _, _) => {
                 comptime.set_span(new_span)
             }
-            Type::PolymorphicInteger(span, binding) => {
+            Type::TypeVariable(binding, kind) => {
                 if let TypeBinding::Bound(binding) = &mut *binding.borrow_mut() {
                     return binding.set_comptime_span(new_span);
                 }
-                span.set_span(new_span);
+                match kind {
+                    TypeVariableKind::IntOrField(comptime) => comptime.set_span(new_span),
+                    TypeVariableKind::Int(comptime) => comptime.set_span(new_span),
+                    _ => (),
+                }
             }
             _ => (),
         }
@@ -552,11 +604,15 @@ impl Type {
             Type::FieldElement(comptime) | Type::Integer(comptime, _, _) => {
                 *comptime = new_comptime;
             }
-            Type::PolymorphicInteger(comptime, binding) => {
+            Type::TypeVariable(binding, kind) => {
                 if let TypeBinding::Bound(binding) = &mut *binding.borrow_mut() {
                     return binding.set_comptime(new_comptime);
                 }
-                *comptime = new_comptime;
+                match kind {
+                    TypeVariableKind::IntOrField(comptime) => *comptime = new_comptime,
+                    TypeVariableKind::Int(comptime) => *comptime = new_comptime,
+                    _ => (),
+                }
             }
             _ => (),
         }
@@ -565,10 +621,10 @@ impl Type {
     /// Try to bind a PolymorphicInt variable to self, succeeding if self is an integer, field,
     /// other PolymorphicInt type, or type variable. If use_subtype is true, the Comptime fields
     /// of each will be checked via subtyping rather than unification.
-    pub fn try_bind_to_polymorphic_int(
+    pub fn try_bind_to(
         &self,
         var: &TypeVariable,
-        var_comptime: &Comptime,
+        var_kind: &TypeVariableKind,
         use_subtype: bool,
         span: Span,
     ) -> Result<(), SpanKind> {
@@ -577,71 +633,61 @@ impl Type {
             TypeBinding::Unbound(id) => *id,
         };
 
-        let bind = |int_comptime: &Comptime| {
-            let mut clone = self.clone();
-            let mut new_comptime = var_comptime.clone();
-            new_comptime.set_span(span);
-            clone.set_comptime(new_comptime);
-
-            *var.borrow_mut() = TypeBinding::Bound(clone);
-
-            if use_subtype {
-                var_comptime.is_subtype_of(int_comptime, span)
-            } else {
-                var_comptime.unify(int_comptime, span)
-            }
-        };
-
         match self {
             Type::FieldElement(int_comptime, ..) | Type::Integer(int_comptime, ..) => {
-                bind(int_comptime)
-            }
-            Type::PolymorphicInteger(int_comptime, self_var) => {
-                let borrow = self_var.borrow();
-                match &*borrow {
-                    TypeBinding::Bound(typ) => {
-                        typ.try_bind_to_polymorphic_int(var, var_comptime, use_subtype, span)
-                    }
-                    // Avoid infinitely recursive bindings
-                    TypeBinding::Unbound(id) if *id == target_id => Ok(()),
-                    TypeBinding::Unbound(_) => {
-                        drop(borrow);
-                        bind(int_comptime)
-                    }
+                let mut clone = self.clone();
+
+                if let Some(mut comptime) = var_kind.get_comptime() {
+                    comptime.set_span(span);
+                    clone.set_comptime(comptime);
+                }
+
+                *var.borrow_mut() = TypeBinding::Bound(clone);
+
+                if use_subtype {
+                    var_kind.is_subtype_of(int_comptime, span)
+                } else {
+                    var_kind.unify(int_comptime, span)
                 }
             }
-            Type::TypeVariable(binding) => {
+            Type::TypeVariable(binding, kind) => {
                 let borrow = binding.borrow();
                 match &*borrow {
-                    TypeBinding::Bound(typ) => {
-                        typ.try_bind_to_polymorphic_int(var, var_comptime, use_subtype, span)
-                    }
+                    TypeBinding::Bound(typ) => typ.try_bind_to(var, var_kind, use_subtype, span),
                     // Avoid infinitely recursive bindings
                     TypeBinding::Unbound(id) if *id == target_id => Ok(()),
                     TypeBinding::Unbound(_) => {
                         drop(borrow);
-                        // PolymorphicInt is more specific than TypeVariable so we bind the type
-                        // variable to PolymorphicInt instead.
-                        let mut clone = Type::PolymorphicInteger(var_comptime.clone(), var.clone());
+
+                        let mut clone = Type::TypeVariable(var.clone(), var_kind.clone());
                         clone.set_comptime_span(span);
                         *binding.borrow_mut() = TypeBinding::Bound(clone);
                         Ok(())
                     }
                 }
             }
-            _ => Err(SpanKind::None),
+            _ => {
+                // Check if the target id occurs within self before binding. Otherwise this could
+                // cause infinitely recursive types
+                if self.occurs(target_id) {
+                    Err(SpanKind::None)
+                } else {
+                    *var.borrow_mut() = TypeBinding::Bound(self.clone());
+                    Ok(())
+                }
+            }
         }
     }
 
-    pub fn try_bind_to(&self, var: &TypeVariable) -> Result<(), SpanKind> {
+    pub fn try_bind_to_any(&self, var: &TypeVariable) -> Result<(), SpanKind> {
         let target_id = match &*var.borrow() {
             TypeBinding::Bound(_) => unreachable!(),
             TypeBinding::Unbound(id) => *id,
         };
 
-        if let Type::TypeVariable(binding) = self {
+        if let Type::TypeVariable(binding, kind) = self {
             match &*binding.borrow() {
-                TypeBinding::Bound(typ) => return typ.try_bind_to(var),
+                TypeBinding::Bound(typ) => return typ.try_bind_to_any(var),
                 // Don't recursively bind the same id to itself
                 TypeBinding::Unbound(id) if *id == target_id => return Ok(()),
                 _ => (),
@@ -662,11 +708,15 @@ impl Type {
         match self {
             Type::FieldElement(comptime) => comptime.is_comptime(),
             Type::Integer(comptime, ..) => comptime.is_comptime(),
-            Type::PolymorphicInteger(comptime, binding) => {
+            Type::TypeVariable(binding, kind) => {
                 if let TypeBinding::Bound(binding) = &*binding.borrow() {
                     return binding.is_comptime();
                 }
-                comptime.is_comptime()
+                match kind {
+                    TypeVariableKind::Any => false,
+                    TypeVariableKind::IntOrField(comptime) => comptime.is_comptime(),
+                    TypeVariableKind::Int(comptime) => comptime.is_comptime(),
+                }
             }
             _ => false,
         }
@@ -717,23 +767,14 @@ impl Type {
         match (self, other) {
             (Error, _) | (_, Error) => Ok(()),
 
-            (PolymorphicInteger(comptime, binding), other)
-            | (other, PolymorphicInteger(comptime, binding)) => {
+            (TypeVariable(binding, kind), other) | (other, TypeVariable(binding, kind)) => {
                 // If it is already bound, unify against what it is bound to
                 if let TypeBinding::Bound(link) = &*binding.borrow() {
                     return link.try_unify(other, span);
                 }
 
                 // Otherwise, check it is unified against an integer and bind it
-                other.try_bind_to_polymorphic_int(binding, comptime, false, span)
-            }
-
-            (TypeVariable(binding), other) | (other, TypeVariable(binding)) => {
-                if let TypeBinding::Bound(link) = &*binding.borrow() {
-                    return link.try_unify(other, span);
-                }
-
-                Ok(())
+                other.try_bind_to(binding, kind, false, span)
             }
 
             (Array(len_a, elem_a), Array(len_b, elem_b)) => {
@@ -823,23 +864,23 @@ impl Type {
         match (self, other) {
             (Error, _) | (_, Error) => Ok(()),
 
-            (PolymorphicInteger(comptime, binding), other) => {
+            (PolymorphicIntOrField(comptime, binding), other) => {
                 if let TypeBinding::Bound(link) = &*binding.borrow() {
                     return link.is_subtype_of(other, span);
                 }
 
                 // Otherwise, check it is unified against an integer and bind it
-                other.try_bind_to_polymorphic_int(binding, comptime, true, span)
+                other.try_bind_to(binding, comptime, true, span)
             }
             // These needs to be a separate case to keep the argument order of is_subtype_of
-            (other, PolymorphicInteger(comptime, binding)) => {
+            (other, PolymorphicIntOrField(comptime, binding)) => {
                 if let TypeBinding::Bound(link) = &*binding.borrow() {
                     return other.is_subtype_of(link, span);
                 }
 
                 // use_subtype is false here since we have other <: PolymorphicInt
                 // while the flag expects PolymorphicInt <: other
-                other.try_bind_to_polymorphic_int(binding, comptime, false, span)
+                other.try_bind_to(binding, comptime, false, span)
             }
 
             (TypeVariable(binding), other) => {
@@ -847,14 +888,14 @@ impl Type {
                     return link.is_subtype_of(other, span);
                 }
 
-                other.try_bind_to(binding)
+                other.try_bind_to_any(binding)
             }
             (other, TypeVariable(binding)) => {
                 if let TypeBinding::Bound(link) = &*binding.borrow() {
                     return other.is_subtype_of(link, span);
                 }
 
-                other.try_bind_to(binding)
+                other.try_bind_to_any(binding)
             }
 
             (Array(len_a, elem_a), Array(len_b, elem_b)) => {
@@ -926,7 +967,7 @@ impl Type {
 
     pub fn array_length(&self) -> Option<u64> {
         match self {
-            Type::PolymorphicInteger(_, binding)
+            Type::PolymorphicIntOrField(_, binding)
             | Type::NamedGeneric(binding, _)
             | Type::TypeVariable(binding) => match &*binding.borrow() {
                 TypeBinding::Bound(binding) => binding.array_length(),
@@ -957,7 +998,11 @@ impl Type {
 
                 AbiType::Integer { sign, width: *bit_width }
             }
-            Type::PolymorphicInteger(_, binding) => match &*binding.borrow() {
+            Type::PolymorphicIntOrField(_, binding) => match &*binding.borrow() {
+                TypeBinding::Bound(typ) => typ.as_abi_type(),
+                TypeBinding::Unbound(_) => Type::default_int_or_field_type(None).as_abi_type(),
+            },
+            Type::PolymorphicInt(_, binding) => match &*binding.borrow() {
                 TypeBinding::Bound(typ) => typ.as_abi_type(),
                 TypeBinding::Unbound(_) => Type::default_int_type(None).as_abi_type(),
             },
@@ -1057,7 +1102,8 @@ impl Type {
                 let element = Box::new(element.substitute(type_bindings));
                 Type::Array(size, element)
             }
-            Type::PolymorphicInteger(_, binding)
+            Type::PolymorphicIntOrField(_, binding)
+            | Type::PolymorphicInt(_, binding)
             | Type::NamedGeneric(binding, _)
             | Type::TypeVariable(binding) => substitute_binding(binding),
 
@@ -1102,7 +1148,8 @@ impl Type {
             Type::Array(len, elem) => len.occurs(target_id) || elem.occurs(target_id),
             Type::Struct(_, generic_args) => generic_args.iter().any(|arg| arg.occurs(target_id)),
             Type::Tuple(fields) => fields.iter().any(|field| field.occurs(target_id)),
-            Type::PolymorphicInteger(_, binding)
+            Type::PolymorphicIntOrField(_, binding)
+            | Type::PolymorphicInt(_, binding)
             | Type::NamedGeneric(binding, _)
             | Type::TypeVariable(binding) => match &*binding.borrow() {
                 TypeBinding::Bound(binding) => binding.occurs(target_id),
@@ -1142,7 +1189,10 @@ impl Type {
             }
             Tuple(args) => Tuple(vecmap(args, |arg| arg.follow_bindings())),
 
-            TypeVariable(var) | PolymorphicInteger(_, var) | NamedGeneric(var, _) => {
+            TypeVariable(var)
+            | PolymorphicIntOrField(_, var)
+            | PolymorphicInt(_, var)
+            | NamedGeneric(var, _) => {
                 if let TypeBinding::Bound(typ) = &*var.borrow() {
                     return typ.follow_bindings();
                 }

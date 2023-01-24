@@ -505,7 +505,7 @@ pub fn infix_operand_type_rules(
             if let TypeBinding::Bound(binding) = &*int.borrow() {
                 return infix_operand_type_rules(binding, op, other, errors);
             }
-            if other.try_bind_to_polymorphic_int(int, comptime, true, op.location.span).is_ok() || other == &Type::Error {
+            if other.try_bind_to(int, comptime, true, op.location.span).is_ok() || other == &Type::Error {
                 Ok(other.clone())
             } else {
                 Err(format!("Types in a binary operation should match, but found {lhs_type} and {rhs_type}"))
@@ -525,8 +525,12 @@ pub fn infix_operand_type_rules(
 
         // The result of two Fields is always a witness
         (FieldElement(comptime_x), FieldElement(comptime_y)) => {
-            let comptime = comptime_x.and(comptime_y, op.location.span);
-            Ok(FieldElement(comptime))
+            if op.is_bitwise() {
+                Err("The 'Field' type does not support bitwise operations, try casting to a sized integer type first".into())
+            } else {
+                let comptime = comptime_x.and(comptime_y, op.location.span);
+                Ok(FieldElement(comptime))
+            }
         }
 
         (Bool(comptime_x), Bool(comptime_y)) => Ok(Bool(comptime_x.and(comptime_y, op.location.span))),
@@ -679,7 +683,7 @@ pub fn comparator_operand_type_rules(
             if let TypeBinding::Bound(binding) = &*int.borrow() {
                 return comparator_operand_type_rules(other, binding, op, errors);
             }
-            if other.try_bind_to_polymorphic_int(int, comptime, true, op.location.span).is_ok() || other == &Type::Error {
+            if other.try_bind_to(int, comptime, true, op.location.span).is_ok() || other == &Type::Error {
                 Ok(Bool(comptime.clone()))
             } else {
                 Err(format!("Types in a binary operation should match, but found {lhs_type} and {rhs_type}"))
