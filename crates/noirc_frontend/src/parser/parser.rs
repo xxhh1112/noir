@@ -66,7 +66,7 @@ fn top_level_statement(
         use_statement().then_ignore(force(just(Token::Semicolon))),
         global_declaration().then_ignore(force(just(Token::Semicolon))),
     ))
-    .recover_via(top_level_statement_recovery())
+    .recover_with(skip_parser(top_level_statement_recovery()))
 }
 
 fn global_declaration() -> impl NoirParser<TopLevelStatement> {
@@ -179,11 +179,11 @@ fn struct_fields() -> impl NoirParser<Vec<(Ident, UnresolvedType)>> {
 }
 
 fn lambda_parameters() -> impl NoirParser<Vec<(Pattern, UnresolvedType)>> {
-    let typ = parse_type().recover_via(parameter_recovery());
+    let typ = parse_type().recover_with(skip_parser(parameter_recovery()));
     let typ = just(Token::Colon).ignore_then(typ);
 
     let parameter = pattern()
-        .recover_via(parameter_name_recovery())
+        .recover_with(skip_parser(parameter_name_recovery()))
         .then(typ.or_not().map(|typ| typ.unwrap_or(UnresolvedType::Unspecified)));
 
     parameter.separated_by(just(Token::Comma)).allow_trailing().labelled("parameter")
@@ -192,10 +192,10 @@ fn lambda_parameters() -> impl NoirParser<Vec<(Pattern, UnresolvedType)>> {
 fn function_parameters<'a>(
     allow_self: bool,
 ) -> impl NoirParser<Vec<(Pattern, UnresolvedType, AbiVisibility)>> + 'a {
-    let typ = parse_type().recover_via(parameter_recovery());
+    let typ = parse_type().recover_with(skip_parser(parameter_recovery()));
 
     let full_parameter = pattern()
-        .recover_via(parameter_name_recovery())
+        .recover_with(skip_parser(parameter_name_recovery()))
         .then_ignore(just(Token::Colon))
         .then(optional_visibility())
         .then(typ)
@@ -250,7 +250,7 @@ where
 {
     use Token::*;
     statement(expr_parser)
-        .recover_via(statement_recovery())
+        .recover_with(skip_parser(statement_recovery()))
         .then(just(Semicolon).or_not().map_with_span(|s, span| (s, span)))
         .repeated()
         .validate(check_statements_require_semicolon)
@@ -573,6 +573,8 @@ fn expression() -> impl ExprParser {
 // An expression is a single term followed by 0 or more (OP subexpression)*
 // where OP is an operator at the given precedence level and subexpression
 // is an expression at the current precedence level plus one.
+//
+// This function uses the shunting yard algorithm internally.
 fn expression_with_precedence<'a, P>(
     precedence: Precedence,
     expr_parser: P,
@@ -605,6 +607,57 @@ where
             .labelled("expression")
     }
 }
+
+///// Should we push this operator onto our operator stack and keep parsing our expression?
+///// This handles the operator precedence and associativity parts of the shunting-yard algorithm.
+// fn should_continue(operator_on_stack: &Token, r_prec: i8, r_is_right_assoc: bool) -> bool {
+//     let (l_prec, _) = precedence(operator_on_stack).unwrap();
+// 
+//     l_prec > r_prec || (l_prec == r_prec && !r_is_right_assoc)
+// }
+// 
+// fn pop_operator<'c>(operator_stack: &mut Vec<&Token>, results: &mut Vec<(Ast<'c>, Location<'c>)>) {
+//     let (rhs, rhs_location) = results.pop().unwrap();
+//     let (lhs, lhs_location) = results.pop().unwrap();
+//     let location = lhs_location.union(rhs_location);
+//     let operator = operator_stack.pop().unwrap().clone();
+//     let call = desugar::desugar_operators(operator, lhs, rhs, location);
+//     results.push((call, location));
+// }
+// 
+// /// Parse an arbitrary expression using the shunting-yard algorithm
+// fn expression<'a, 'b>(input: Input<'a, 'b>) -> AstResult<'a, 'b> {
+//     let (mut input, value, location) = term(input)?;
+// 
+//     let mut operator_stack = vec![];
+//     let mut results = vec![(value, location)];
+// 
+//     // loop while the next token is an operator
+//     while let Some((prec, right_associative)) = precedence(&input[0].0) {
+//         while !operator_stack.is_empty()
+//             && should_continue(operator_stack[operator_stack.len() - 1], prec, right_associative)
+//         {
+//             pop_operator(&mut operator_stack, &mut results);
+//         }
+// 
+//         operator_stack.push(&input[0].0);
+//         input = &input[1..];
+// 
+//         let (new_input, value, location) = no_backtracking(term)(input)?;
+//         results.push((value, location));
+//         input = new_input;
+//     }
+// 
+//     while !operator_stack.is_empty() {
+//         assert!(results.len() >= 2);
+//         pop_operator(&mut operator_stack, &mut results);
+//     }
+// 
+//     assert!(operator_stack.is_empty());
+//     assert!(results.len() == 1);
+//     let (value, location) = results.pop().unwrap();
+//     Ok((input, value, location))
+// }
 
 fn create_infix_expression(lhs: Expression, (operator, rhs): (BinaryOp, Expression)) -> Expression {
     let span = lhs.span.merge(rhs.span);

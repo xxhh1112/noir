@@ -201,7 +201,7 @@ fn top_level_statement_recovery() -> impl NoirParser<TopLevelStatement> {
 
 /// Force the given parser to succeed, logging any errors it had
 fn force<'a, T: 'a>(parser: impl NoirParser<T> + 'a) -> impl NoirParser<Option<T>> + 'a {
-    parser.map(Some).recover_via(empty().map(|_| None))
+    parser.map(Some).recover_with(skip_parser(empty().map(|_| None)))
 }
 
 #[derive(Clone, Debug, Default)]
