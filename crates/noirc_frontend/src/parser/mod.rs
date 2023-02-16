@@ -102,8 +102,8 @@ where
     P2: NoirParser<T2> + 'a,
     T2: Clone + Recoverable,
 {
-    let second_parser = skip_then_retry_until(second_parser)
-        .map_with_span(|option, span| option.unwrap_or_else(|| Recoverable::error(span)));
+    // let second_parser = skip_then_retry_until(second_parser)
+    //     .map_with_span(|option, span| option.unwrap_or_else(|| Recoverable::error(span)));
 
     first_parser.then(second_parser)
 }
@@ -117,7 +117,7 @@ where
     P2: NoirParser<T2> + 'a,
     T2: Clone,
 {
-    let second_parser = skip_then_retry_until(second_parser);
+    //let second_parser = skip_then_retry_until(second_parser);
     first_parser.then_ignore(second_parser)
 }
 
@@ -130,8 +130,8 @@ where
     P2: NoirParser<T2> + 'a,
     T2: Recoverable,
 {
-    let second_parser = skip_then_retry_until(second_parser)
-        .map_with_span(|option, span| option.unwrap_or_else(|| Recoverable::error(span)));
+    // let second_parser = skip_then_retry_until(second_parser)
+    //     .map_with_span(|option, span| option.unwrap_or_else(|| Recoverable::error(span)));
 
     first_parser.ignore_then(second_parser)
 }
@@ -201,7 +201,7 @@ fn top_level_statement_recovery() -> impl NoirParser<TopLevelStatement> {
 
 /// Force the given parser to succeed, logging any errors it had
 fn force<'a, T: 'a>(parser: impl NoirParser<T> + 'a) -> impl NoirParser<Option<T>> + 'a {
-    parser.map(Some).recover_with(skip_parser(empty().map(|_| None)))
+    parser.or_not()
 }
 
 #[derive(Clone, Debug, Default)]
