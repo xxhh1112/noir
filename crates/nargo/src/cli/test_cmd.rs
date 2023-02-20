@@ -14,7 +14,8 @@ use super::{add_std_lib, NargoConfig};
 #[derive(Debug, Clone, Args)]
 pub(crate) struct TestCommand {
     /// If given, only tests with names containing this string will be run
-    test_name: Option<String>,
+    #[arg(default_value = "")]
+    test_name: String,
 
     /// Issue a warning for each unused variable instead of an error
     #[arg(short, long)]
@@ -26,9 +27,7 @@ pub(crate) struct TestCommand {
 }
 
 pub(crate) fn run(args: TestCommand, config: NargoConfig) -> Result<(), CliError> {
-    let test_name: String = args.test_name.unwrap_or_else(|| "".to_owned());
-
-    run_tests(&config.program_dir, &test_name, args.allow_warnings, args.show_logs)
+    run_tests(&config.program_dir, &args.test_name, args.allow_warnings, args.show_logs)
 }
 
 fn run_tests(
