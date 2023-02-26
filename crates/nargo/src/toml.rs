@@ -28,14 +28,17 @@ impl Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Package {
     // Note: a package name is not needed unless there is a registry
+    /// The authors responsible for writing the Noir package.
     pub authors: Vec<String>,
     // If not compiler version is supplied, the latest is used
     // For now, we state that all packages must be compiled under the same
     // compiler version.
     // We also state that ACIR and the compiler will upgrade in lockstep.
     // so you will not need to supply an ACIR and compiler version
+    /// The Noir compiler version which the package targets.
     pub compiler_version: Option<String>,
     pub backend: Option<String>,
+    /// The license under which the Noir package is available.
     pub license: Option<String>,
 }
 
