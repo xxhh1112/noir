@@ -1,0 +1,28 @@
+[package]
+name = "noir_util_wasm"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+
+acvm.workspace = true
+noirc_abi.workspace = true
+wasm-bindgen.workspace = true
+serde.workspace = true
+
+console_error_panic_hook = "0.1.7"
+serde_json = "1.0"
+js-sys = { version = "0.3.61" }
+
+[dev-dependencies]
+wasm-bindgen-test.workspace = true
+
+[build-dependencies]
+build-data = "0.1.3"

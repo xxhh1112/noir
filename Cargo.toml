@@ -11,6 +11,7 @@ members = [
     "crates/noirc_abi",
     "crates/iter-extended",
     "crates/wasm",
+    "crates/noir_util_wasm",
 ]
 default-members = ["crates/nargo"]
 
@@ -34,6 +35,7 @@ noirc_errors = { path = "crates/noirc_errors" }
 noirc_evaluator = { path = "crates/noirc_evaluator" }
 noirc_frontend = { path = "crates/noirc_frontend" }
 noir_wasm = { path = "crates/wasm" }
+noir_util_wasm = { path = "crates/noir_util_wasm" }
 
 cfg-if = "1.0.0"
 clap = { version = "4.1.4", features = ["derive"]}
