@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use acvm::{acir::native_types::Witness, FieldElement};
+use acvm::{
+    acir::{circuit::Circuit, native_types::Witness},
+    FieldElement,
+};
 use wasm_bindgen::prelude::*;
 
 use noirc_abi::{input_parser, Abi, MAIN_RETURN_NAME};
@@ -20,6 +23,26 @@ fn js_map_to_witness_map(js_map: js_sys::Map) -> BTreeMap<Witness, FieldElement>
         witness_skeleton.insert(Witness(idx), field_element);
     }
     witness_skeleton
+}
+
+fn witness_map_to_js_map(witness_map: BTreeMap<Witness, FieldElement>) -> js_sys::Map {
+    let js_map = js_sys::Map::new();
+    for (witness, field_value) in witness_map.iter() {
+        let js_idx = js_sys::Number::from(witness.0);
+        let mut hex_str = "0x".to_owned();
+        hex_str.push_str(&field_value.to_hex());
+        let js_hex_str = js_sys::JsString::from(hex_str);
+        js_map.set(&js_idx, &js_hex_str);
+    }
+    js_map
+}
+
+fn read_circuit(circuit: js_sys::Uint8Array) -> Circuit {
+    let circuit: Vec<u8> = circuit.to_vec();
+    match Circuit::read(&*circuit) {
+        Ok(circuit) => circuit,
+        Err(err) => panic!("Circuit read err: {}", err),
+    }
 }
 
 #[wasm_bindgen]
@@ -63,4 +86,27 @@ pub fn select_return_value(abi_json_str: String, intermediate_witness: js_sys::M
         Ok(json_str) => json_str,
         Err(err) => panic!("Failed to serialise return value: {}", err),
     }
+}
+
+#[wasm_bindgen]
+pub fn select_public_witness(
+    circuit: js_sys::Uint8Array,
+    intermediate_witness: js_sys::Map,
+) -> js_sys::Map {
+    console_error_panic_hook::set_once();
+
+    let circuit = read_circuit(circuit);
+    let intermediate_witness = js_map_to_witness_map(intermediate_witness);
+    let public_witness = circuit
+        .public_inputs
+        .indices()
+        .iter()
+        .map(|idx| {
+            let witness = Witness(*idx);
+            let field_element =
+                *intermediate_witness.get(&witness).expect("witness element not found");
+            (witness, field_element)
+        })
+        .collect::<BTreeMap<_, _>>();
+    witness_map_to_js_map(public_witness)
 }
