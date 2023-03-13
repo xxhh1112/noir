@@ -1,8 +1,26 @@
+use std::collections::BTreeMap;
+
+use acvm::{acir::native_types::Witness, FieldElement};
 use wasm_bindgen::prelude::*;
 
-use noirc_abi::{input_parser, Abi};
+use noirc_abi::{input_parser, Abi, MAIN_RETURN_NAME};
 
 mod js_sys_util;
+
+fn js_map_to_witness_map(js_map: js_sys::Map) -> BTreeMap<Witness, FieldElement> {
+    let mut witness_skeleton: BTreeMap<Witness, FieldElement> = BTreeMap::new();
+    for key_result in js_map.keys() {
+        let key = key_result.expect("bad key");
+        let idx;
+        unsafe {
+            idx = key.as_f64().expect("not a number").to_int_unchecked::<u32>();
+        }
+        let hex_str = js_map.get(&key).as_string().expect("not a string");
+        let field_element = FieldElement::from_hex(&hex_str).expect("bad hex str");
+        witness_skeleton.insert(Witness(idx), field_element);
+    }
+    witness_skeleton
+}
 
 #[wasm_bindgen]
 pub fn arrange_initial_witness(abi_json_str: String, inputs_json_str: String) -> js_sys::Map {
@@ -22,4 +40,27 @@ pub fn arrange_initial_witness(abi_json_str: String, inputs_json_str: String) ->
         Err(err) => panic!("Failed to arrange initial witness: {}", err),
     };
     js_sys_util::witness_map_to_js_map(initial_witness)
+}
+
+#[wasm_bindgen]
+pub fn select_return_value(abi_json_str: String, intermediate_witness: js_sys::Map) -> String {
+    console_error_panic_hook::set_once();
+
+    let intermediate_witness = js_map_to_witness_map(intermediate_witness);
+    let abi = match serde_json::from_str::<Abi>(&abi_json_str) {
+        Ok(abi) => abi,
+        Err(err) => panic!("Failed to read ABI: {}", err),
+    };
+    let parser = input_parser::Format::Json;
+    let return_value = match abi.decode(&intermediate_witness) {
+        // `None` indicates that the circuit has no return value -> return a serialised "null"
+        Ok((_inputs_map, None)) => return "null".to_owned(),
+        Ok((_inputs_map, Some(return_value))) => return_value,
+        Err(err) => panic!("Failed to decode intermediate witness: {}", err),
+    };
+    let input_map = BTreeMap::from([(MAIN_RETURN_NAME.to_owned(), return_value)]);
+    match parser.serialize(&input_map) {
+        Ok(json_str) => json_str,
+        Err(err) => panic!("Failed to serialise return value: {}", err),
+    }
 }
