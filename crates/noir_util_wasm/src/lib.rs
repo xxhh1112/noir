@@ -75,11 +75,12 @@ pub fn arrange_public_witness(abi_json_str: String, inputs_json_str: String) -> 
     };
     let public_abi = abi.public_abi();
     let parser = input_parser::Format::Json;
-    let input_map = match parser.parse(&inputs_json_str, &public_abi) {
+    let mut input_map = match parser.parse(&inputs_json_str, &public_abi) {
         Ok(input_map) => input_map,
         Err(err) => panic!("Failed to parse input: {}", err),
     };
-    let public_witness = match public_abi.encode(&input_map, None) {
+    let return_value = input_map.remove(MAIN_RETURN_NAME);
+    let public_witness = match public_abi.encode(&input_map, return_value) {
         Ok(public_witness) => public_witness,
         Err(err) => panic!("Failed to arrange initial witness: {}", err),
     };
