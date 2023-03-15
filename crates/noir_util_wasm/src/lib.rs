@@ -66,6 +66,27 @@ pub fn arrange_initial_witness(abi_json_str: String, inputs_json_str: String) ->
 }
 
 #[wasm_bindgen]
+pub fn arrange_public_witness(abi_json_str: String, inputs_json_str: String) -> js_sys::Map {
+    console_error_panic_hook::set_once();
+
+    let abi = match serde_json::from_str::<Abi>(&abi_json_str) {
+        Ok(abi) => abi,
+        Err(err) => panic!("Failed to read ABI: {}", err),
+    };
+    let public_abi = abi.public_abi();
+    let parser = input_parser::Format::Json;
+    let input_map = match parser.parse(&inputs_json_str, &public_abi) {
+        Ok(input_map) => input_map,
+        Err(err) => panic!("Failed to parse input: {}", err),
+    };
+    let public_witness = match public_abi.encode(&input_map, None) {
+        Ok(public_witness) => public_witness,
+        Err(err) => panic!("Failed to arrange initial witness: {}", err),
+    };
+    js_sys_util::witness_map_to_js_map(public_witness)
+}
+
+#[wasm_bindgen]
 pub fn select_return_value(abi_json_str: String, intermediate_witness: js_sys::Map) -> String {
     console_error_panic_hook::set_once();
 
