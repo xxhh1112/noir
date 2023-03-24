@@ -9,7 +9,7 @@ use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 
 mod compile;
-pub use compile::{compile, WASMCompileOptions};
+pub use compile::{compile_contracts, compile_program, WASMCompileOptions};
 
 #[derive(Serialize, Deserialize)]
 pub struct BuildInfo {

@@ -14,10 +14,6 @@ pub struct WASMCompileOptions {
     #[serde(default = "default_circuit_name")]
     circuit_name: String,
 
-    // Compile each contract function used within the program
-    #[serde(default = "bool::default")]
-    contracts: bool,
-
     #[serde(default)]
     compile_options: CompileOptions,
 
@@ -46,7 +42,6 @@ impl Default for WASMCompileOptions {
             entry_point: default_entry_point(),
             circuit_name: default_circuit_name(),
             log_level: default_log_level(),
-            contracts: false,
             compile_options: CompileOptions::default(),
             optional_dependencies_set: vec![],
         }
@@ -78,7 +73,7 @@ fn setup_driver(entry_point: PathBuf, dependency_set: &[String]) -> Driver {
 }
 
 #[wasm_bindgen]
-pub fn compile(args: JsValue) -> JsValue {
+pub fn compile_program(args: JsValue) -> JsValue {
     console_error_panic_hook::set_once();
 
     let options: WASMCompileOptions = if args.is_undefined() || args.is_null() {
@@ -94,29 +89,45 @@ pub fn compile(args: JsValue) -> JsValue {
     let mut driver =
         setup_driver(PathBuf::from(options.entry_point), &options.optional_dependencies_set);
 
-    if options.contracts {
-        let compiled_contracts = driver
-            .compile_contracts(&options.compile_options)
-            .unwrap_or_else(|_| panic!("Contract compilation failed"));
+    let compiled_program = driver
+        .compile_main(&options.compile_options)
+        .unwrap_or_else(|_| panic!("Compilation failed"));
 
-        // Flatten each contract into a list of its functions, each being assigned a unique name.
-        let collected_compiled_programs: Vec<_> = compiled_contracts
-            .into_iter()
-            .flat_map(|contract| {
-                let contract_id = format!("{}-{}", options.circuit_name, &contract.name);
-                contract.functions.into_iter().map(move |(function, program)| {
-                    let program_name = format!("{}-{}", contract_id, function);
-                    (program_name, program)
-                })
-            })
-            .collect();
+    <JsValue as JsValueSerdeExt>::from_serde(&compiled_program).unwrap()
+}
 
-        <JsValue as JsValueSerdeExt>::from_serde(&collected_compiled_programs).unwrap()
+#[wasm_bindgen]
+pub fn compile_contracts(args: JsValue) -> JsValue {
+    console_error_panic_hook::set_once();
+
+    let options: WASMCompileOptions = if args.is_undefined() || args.is_null() {
+        debug!("Initializing compiler with default values.");
+        WASMCompileOptions::default()
     } else {
-        let compiled_program = driver
-            .compile_main(&options.compile_options)
-            .unwrap_or_else(|_| panic!("Compilation failed"));
+        JsValueSerdeExt::into_serde(&args)
+            .unwrap_or_else(|_| panic!("Could not deserialize compile arguments"))
+    };
 
-        <JsValue as JsValueSerdeExt>::from_serde(&compiled_program).unwrap()
-    }
+    debug!("Compiler configuration {:?}", &options);
+
+    let mut driver =
+        setup_driver(PathBuf::from(options.entry_point), &options.optional_dependencies_set);
+
+    let compiled_contracts = driver
+        .compile_contracts(&options.compile_options)
+        .unwrap_or_else(|_| panic!("Contract compilation failed"));
+
+    // Flatten each contract into a list of its functions, each being assigned a unique name.
+    let collected_compiled_programs: Vec<_> = compiled_contracts
+        .into_iter()
+        .flat_map(|contract| {
+            let contract_id = format!("{}-{}", options.circuit_name, &contract.name);
+            contract.functions.into_iter().map(move |(function, program)| {
+                let program_name = format!("{}-{}", contract_id, function);
+                (program_name, program)
+            })
+        })
+        .collect();
+
+    <JsValue as JsValueSerdeExt>::from_serde(&collected_compiled_programs).unwrap()
 }
