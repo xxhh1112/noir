@@ -60,6 +60,23 @@ fn add_noir_lib(driver: &mut Driver, crate_name: &str) {
     driver.propagate_dep(library_crate, &CrateName::new(crate_name).unwrap());
 }
 
+fn setup_driver(entry_point: PathBuf, dependency_set: &[String]) -> Driver {
+    // For now we default to plonk width = 3, though we can add it as a parameter
+    let language = acvm::Language::PLONKCSat { width: 3 };
+    let mut driver = Driver::new(&language);
+
+    driver.create_local_crate(entry_point, CrateType::Binary);
+
+    // We are always adding std lib implicitly. It comes bundled with binary.
+    add_noir_lib(&mut driver, "std");
+
+    for dependency in dependency_set {
+        add_noir_lib(&mut driver, dependency.as_str());
+    }
+
+    driver
+}
+
 #[wasm_bindgen]
 pub fn compile(args: JsValue) -> JsValue {
     console_error_panic_hook::set_once();
@@ -74,21 +91,8 @@ pub fn compile(args: JsValue) -> JsValue {
 
     debug!("Compiler configuration {:?}", &options);
 
-    // For now we default to plonk width = 3, though we can add it as a parameter
-    let language = acvm::Language::PLONKCSat { width: 3 };
-    let mut driver = noirc_driver::Driver::new(&language);
-
-    let path = PathBuf::from(&options.entry_point);
-    driver.create_local_crate(path, CrateType::Binary);
-
-    // We are always adding std lib implicitly. It comes bundled with binary.
-    add_noir_lib(&mut driver, "std");
-
-    for dependency in options.optional_dependencies_set {
-        add_noir_lib(&mut driver, dependency.as_str());
-    }
-
-    driver.check_crate(&options.compile_options).unwrap_or_else(|_| panic!("Crate check failed"));
+    let mut driver =
+        setup_driver(PathBuf::from(options.entry_point), &options.optional_dependencies_set);
 
     if options.contracts {
         let compiled_contracts = driver
@@ -109,10 +113,8 @@ pub fn compile(args: JsValue) -> JsValue {
 
         <JsValue as JsValueSerdeExt>::from_serde(&collected_compiled_programs).unwrap()
     } else {
-        let main =
-            driver.main_function().unwrap_or_else(|_| panic!("Could not find main function!"));
         let compiled_program = driver
-            .compile_no_check(&options.compile_options, main)
+            .compile_main(&options.compile_options)
             .unwrap_or_else(|_| panic!("Compilation failed"));
 
         <JsValue as JsValueSerdeExt>::from_serde(&compiled_program).unwrap()
