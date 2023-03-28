@@ -89,7 +89,8 @@ pub(crate) fn prove_with_path<P: AsRef<Path>>(
     )?;
 
     let solved_witness = execute_program(&compiled_program, &inputs_map)?;
-
+    dbg!(solved_witness.clone());
+    dbg!(compiled_program.circuit.opcodes.clone());
     // Write public inputs into Verifier.toml
     let public_abi = compiled_program.abi.clone().public_abi();
     let (public_inputs, return_value) = public_abi.decode(&solved_witness)?;
