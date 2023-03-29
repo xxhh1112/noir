@@ -195,6 +195,16 @@ impl IrGenerator {
                     let function_node_id = self.context.get_or_create_opcode_node_id(opcode);
                     Ok(Value::Node(function_node_id))
                 }
+                Definition::Oracle(name, func_id) => {
+                    let id = *func_id;
+                    // let name_copy = CopyString::from_string(name);
+                    // let opcode = builtin::Opcode::Oracle(name_copy, id, NodeId::dummy());
+                    if !self.context.function_already_compiled(id) {
+                        let index = self.context.get_function_index();
+                        self.create_function(id, index, Some(name.into()))?;
+                    }
+                    Ok(Value::Node(self.context.get_function_node_id(id).unwrap()))
+                }
             }
         }
     }

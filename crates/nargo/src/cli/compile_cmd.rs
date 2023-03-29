@@ -34,6 +34,7 @@ pub(crate) fn run(args: CompileCommand, config: NargoConfig) -> Result<(), CliEr
         let compiled_contracts = driver
             .compile_contracts(&args.compile_options)
             .map_err(|_| CliError::CompilationError)?;
+        dbg!(&compiled_contracts);
         save_and_preprocess_contract(&compiled_contracts, &args.circuit_name, &circuit_dir)
     } else {
         let program = compile_circuit(&config.program_dir, &args.compile_options)?;

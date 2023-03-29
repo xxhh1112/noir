@@ -8,7 +8,7 @@ use crate::CompiledProgram;
 /// A contract function unlike a regular Noir program
 /// however can have addition properties.
 /// One of these being a function type.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct ContractFunction {
     pub func_type: ContractFunctionType,
     pub function: CompiledProgram,
@@ -32,7 +32,7 @@ pub enum ContractFunctionType {
     Unconstrained,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct CompiledContract {
     /// The name of the contract.
     pub name: String,
