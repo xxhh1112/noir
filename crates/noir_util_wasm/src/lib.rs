@@ -134,7 +134,7 @@ pub fn select_public_witness(
 }
 
 #[wasm_bindgen]
-pub fn select_public_witness_flattened(
+pub fn select_return_flattened(
     circuit: js_sys::Uint8Array,
     intermediate_witness: js_sys::Map,
 ) -> js_sys::Array {
@@ -143,7 +143,7 @@ pub fn select_public_witness_flattened(
     let circuit = read_circuit(circuit);
     let intermediate_witness = js_map_to_witness_map(intermediate_witness);
     let out = js_sys::Array::default();
-    for witness in circuit.public_inputs().indices() {
+    for witness in circuit.return_values.indices() {
         let field_element =
             *intermediate_witness.get(&Witness(witness)).expect("witness element not found");
         let hex: String = format!("0x{}", field_element.to_hex()).into();
