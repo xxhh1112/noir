@@ -234,7 +234,7 @@ impl IrGenerator {
             Ok::<NodeId, RuntimeError>(return_id)
         })?;
 
-        if func.name == "foo" {
+        if func.name == "rand" {
             func.result_types = vec![ObjectType::NativeField];
         }
 
