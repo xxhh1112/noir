@@ -120,7 +120,7 @@ pub fn select_public_witness(
     let circuit = read_circuit(circuit);
     let intermediate_witness = js_map_to_witness_map(intermediate_witness);
     let public_witness = circuit
-        .public_inputs
+        .public_inputs()
         .indices()
         .iter()
         .map(|idx| {
@@ -143,7 +143,7 @@ pub fn select_public_witness_flattened(
     let circuit = read_circuit(circuit);
     let intermediate_witness = js_map_to_witness_map(intermediate_witness);
     let out = js_sys::Array::default();
-    for witness in circuit.public_inputs.indices() {
+    for witness in circuit.public_inputs().indices() {
         let field_element =
             *intermediate_witness.get(&Witness(witness)).expect("witness element not found");
         let hex: String = format!("0x{}", field_element.to_hex()).into();
