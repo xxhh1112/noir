@@ -132,3 +132,22 @@ pub fn select_public_witness(
         .collect::<BTreeMap<_, _>>();
     witness_map_to_js_map(public_witness)
 }
+
+#[wasm_bindgen]
+pub fn select_public_witness_flattened(
+    circuit: js_sys::Uint8Array,
+    intermediate_witness: js_sys::Map,
+) -> js_sys::Array {
+    console_error_panic_hook::set_once();
+
+    let circuit = read_circuit(circuit);
+    let intermediate_witness = js_map_to_witness_map(intermediate_witness);
+    let out = js_sys::Array::default();
+    for witness in circuit.public_inputs.indices() {
+        let field_element =
+            *intermediate_witness.get(&Witness(witness)).expect("witness element not found");
+        let hex: String = format!("0x{}", field_element.to_hex()).into();
+        out.push(&js_sys::JsString::from(hex));
+    }
+    out
+}
