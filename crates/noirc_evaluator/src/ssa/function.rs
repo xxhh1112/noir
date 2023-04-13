@@ -85,7 +85,7 @@ impl SsaFunction {
         //Optimization
         //catch the error because the function may not be called
         super::optimizations::full_cse(&mut ir_gen.context, self.entry_block, false)?;
-        let brillig = BrilligGen::ir_to_brillig(&ir_gen.context, self.entry_block);
+        let brillig = Vec::new(); // = BrilligGen::ir_to_brillig(&ir_gen.context, self.entry_block);
         //Unrolling
         super::flatten::unroll_tree(&mut ir_gen.context, self.entry_block)?;
 

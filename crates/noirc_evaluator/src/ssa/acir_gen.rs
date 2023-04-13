@@ -159,8 +159,6 @@ impl Acir {
         }
 
         for i in returns {
-            let var = self.var_cache.get_or_compute_internal_var_unwrap(*i, evaluator, ctx);
-            let witness = self.var_cache.get_or_compute_witness_unwrap(var, evaluator, ctx);
             jabber_outputs.push(jabber_output(self, *i, ctx, evaluator));
         }
 
