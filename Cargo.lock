@@ -16,20 +16,8 @@ dependencies = [
 
 [[package]]
 name = "acir"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "744c21590f6da95914f1d83f247dba49d4f287beb725bfbcbc54eaf823484b1a"
-dependencies = [
- "acir_field 0.6.0",
- "flate2",
- "rmp-serde",
- "serde",
-]
-
-[[package]]
-name = "acir"
 version = "0.8.0"
-source = "git+https://github.com/noir-lang/acvm.git?rev=ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb#ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb"
+source = "git+https://github.com/noir-lang/acvm.git?rev=77857ebec10a138e621dea06a466ce9995109712#77857ebec10a138e621dea06a466ce9995109712"
 dependencies = [
  "acir_field 0.8.0",
  "brillig_bytecode",
@@ -57,22 +45,8 @@ dependencies = [
 
 [[package]]
 name = "acir_field"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "081a09b71facabddd411bfb8459c0f4d9350c39707680da6c04debb3db9de503"
-dependencies = [
- "ark-bn254 0.4.0",
- "ark-ff 0.4.1",
- "cfg-if 1.0.0",
- "hex",
- "num-bigint",
- "serde",
-]
-
-[[package]]
-name = "acir_field"
 version = "0.8.0"
-source = "git+https://github.com/noir-lang/acvm.git?rev=ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb#ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb"
+source = "git+https://github.com/noir-lang/acvm.git?rev=77857ebec10a138e621dea06a466ce9995109712#77857ebec10a138e621dea06a466ce9995109712"
 dependencies = [
  "ark-bn254 0.4.0",
  "ark-ff 0.4.1",
@@ -103,25 +77,8 @@ dependencies = [
 
 [[package]]
 name = "acvm"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73876b7d5d23d0826ea4c9150b4a62af0b20a6937a79472ee0ceda30868aa207"
-dependencies = [
- "acir 0.6.0",
- "acvm_stdlib 0.6.0",
- "blake2",
- "indexmap",
- "k256",
- "num-bigint",
- "num-traits",
- "sha2",
- "thiserror",
-]
-
-[[package]]
-name = "acvm"
 version = "0.8.0"
-source = "git+https://github.com/noir-lang/acvm.git?rev=ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb#ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb"
+source = "git+https://github.com/noir-lang/acvm.git?rev=77857ebec10a138e621dea06a466ce9995109712#77857ebec10a138e621dea06a466ce9995109712"
 dependencies = [
  "acir 0.8.0",
  "acvm_stdlib 0.8.0",
@@ -147,17 +104,8 @@ dependencies = [
 
 [[package]]
 name = "acvm_stdlib"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2259c21b06db652e41bddb1deb22da8d303746a0e8bf877983c7d83f71943b8"
-dependencies = [
- "acir 0.6.0",
-]
-
-[[package]]
-name = "acvm_stdlib"
 version = "0.8.0"
-source = "git+https://github.com/noir-lang/acvm.git?rev=ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb#ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb"
+source = "git+https://github.com/noir-lang/acvm.git?rev=77857ebec10a138e621dea06a466ce9995109712#77857ebec10a138e621dea06a466ce9995109712"
 dependencies = [
  "acir 0.8.0",
 ]
@@ -560,7 +508,7 @@ dependencies = [
 [[package]]
 name = "barretenberg_static_lib"
 version = "0.1.0"
-source = "git+https://github.com/noir-lang/aztec_backend?rev=b7f68bddcf05de22f77726c94450791141accc9a#b7f68bddcf05de22f77726c94450791141accc9a"
+source = "git+https://github.com/noir-lang/aztec_backend?rev=c31a6415091b9ce5ce6bd7dbdbfc3a970cbbe164#c31a6415091b9ce5ce6bd7dbdbfc3a970cbbe164"
 dependencies = [
  "barretenberg_wrapper",
  "common",
@@ -569,7 +517,7 @@ dependencies = [
 [[package]]
 name = "barretenberg_wasm"
 version = "0.1.0"
-source = "git+https://github.com/noir-lang/aztec_backend?rev=b7f68bddcf05de22f77726c94450791141accc9a#b7f68bddcf05de22f77726c94450791141accc9a"
+source = "git+https://github.com/noir-lang/aztec_backend?rev=c31a6415091b9ce5ce6bd7dbdbfc3a970cbbe164#c31a6415091b9ce5ce6bd7dbdbfc3a970cbbe164"
 dependencies = [
  "common",
  "wasmer",
@@ -655,9 +603,10 @@ dependencies = [
 [[package]]
 name = "brillig_bytecode"
 version = "0.1.0"
-source = "git+https://github.com/noir-lang/acvm.git?rev=ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb#ea5b5db4cbe46538b1cbc28769e681fc0c1d32fb"
+source = "git+https://github.com/noir-lang/acvm.git?rev=77857ebec10a138e621dea06a466ce9995109712#77857ebec10a138e621dea06a466ce9995109712"
 dependencies = [
  "acir_field 0.8.0",
+ "num-bigint",
  "serde",
 ]
 
@@ -902,9 +851,9 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/noir-lang/aztec_backend?rev=b7f68bddcf05de22f77726c94450791141accc9a#b7f68bddcf05de22f77726c94450791141accc9a"
+source = "git+https://github.com/noir-lang/aztec_backend?rev=c31a6415091b9ce5ce6bd7dbdbfc3a970cbbe164#c31a6415091b9ce5ce6bd7dbdbfc3a970cbbe164"
 dependencies = [
- "acvm 0.6.0",
+ "acvm 0.8.0",
  "blake2",
  "dirs 3.0.2",
  "downloader",
