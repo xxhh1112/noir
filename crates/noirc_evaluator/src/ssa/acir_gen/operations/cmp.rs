@@ -75,11 +75,7 @@ pub(super) fn evaluate_neq(
     // Arriving here means that `lhs` and `rhs` are not Arrays
     let l_c = l_c.expect("ICE: unexpected array pointer");
     let r_c = r_c.expect("ICE: unexpected array pointer");
-    let x = InternalVar::from(constraints::subtract(
-        l_c.expression(),
-        FieldElement::one(),
-        r_c.expression(),
-    ));
+    let x = InternalVar::from(l_c.expression() - r_c.expression());
 
     // Check if `x` is constant. If so, we can evaluate whether
     // it is zero at compile time.
@@ -108,8 +104,7 @@ pub(super) fn evaluate_eq(
     ctx: &SsaContext,
     evaluator: &mut Evaluator,
 ) -> Expression {
-    let neq = evaluate_neq(acir_gen, lhs, rhs, l_c, r_c, ctx, evaluator);
-    constraints::subtract(&Expression::one(), FieldElement::one(), &neq)
+    FieldElement::one() - evaluate_neq(acir_gen, lhs, rhs, l_c, r_c, ctx, evaluator)
 }
 
 // Given two `MemArray`s, generate constraints that check whether

@@ -18,7 +18,7 @@ use iter_extended::vecmap;
 use std::collections::{BTreeMap, HashSet};
 
 use super::{
-    constraints::{self, mul_with_witness, subtract},
+    constraints::{self, mul_with_witness},
     operations::{self},
 };
 
@@ -182,12 +182,12 @@ impl ArrayHeap {
             sort_by: vec![0, 1],
         }));
         if read_write {
-            let init = subtract(&out_op[0], FieldElement::one(), &Expression::one());
+            let init = out_op[0].clone() - FieldElement::one();
             evaluator.opcodes.push(AcirOpcode::Arithmetic(init));
         }
         for i in 0..len - 1 {
             // index sort
-            let index_sub = subtract(&out_index[i + 1], FieldElement::one(), &out_index[i]);
+            let index_sub = &out_index[i + 1] - &out_index[i];
             let primary_order = constraints::boolean_expr(&index_sub, evaluator);
             evaluator.opcodes.push(AcirOpcode::Arithmetic(primary_order));
             // counter sort
@@ -198,26 +198,18 @@ impl ArrayHeap {
                 false,
                 evaluator,
             );
-            let sub_cmp = subtract(&cmp, FieldElement::one(), &Expression::one());
-            let secondary_order = subtract(
-                &mul_with_witness(evaluator, &index_sub, &sub_cmp),
-                FieldElement::one(),
-                &sub_cmp,
-            );
+            let sub_cmp = cmp - FieldElement::one();
+            let secondary_order = &mul_with_witness(evaluator, &index_sub, &sub_cmp) - &sub_cmp;
             evaluator.opcodes.push(AcirOpcode::Arithmetic(secondary_order));
             // consistency checks
-            let sub2 = subtract(&out_value[i + 1], FieldElement::one(), &out_value[i]);
+            let sub2 = &out_value[i + 1] - &out_value[i];
             let load_on_same_adr = if read_write {
-                let sub1 = subtract(&Expression::one(), FieldElement::one(), &out_op[i + 1]);
+                let sub1 = FieldElement::one() - out_op[i + 1].clone();
                 let store_on_new_adr = mul_with_witness(evaluator, &index_sub, &sub1);
                 evaluator.opcodes.push(AcirOpcode::Arithmetic(store_on_new_adr));
                 mul_with_witness(evaluator, &sub1, &sub2)
             } else {
-                subtract(
-                    &mul_with_witness(evaluator, &index_sub, &sub2),
-                    FieldElement::one(),
-                    &sub2,
-                )
+                &mul_with_witness(evaluator, &index_sub, &sub2) - &sub2
             };
             evaluator.opcodes.push(AcirOpcode::Arithmetic(load_on_same_adr));
         }

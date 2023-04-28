@@ -6,7 +6,7 @@ use crate::{
     },
     Evaluator,
 };
-use acvm::{acir::native_types::Expression, FieldElement};
+use acvm::acir::native_types::Expression;
 
 pub(crate) fn evaluate(
     condition: NodeId,
@@ -30,10 +30,5 @@ pub(super) fn evaluate_expression(
     rhs: &Expression,
     evaluator: &mut Evaluator,
 ) -> Expression {
-    let sub = constraints::subtract(lhs, FieldElement::one(), rhs);
-    constraints::add(
-        &constraints::mul_with_witness(evaluator, condition, &sub),
-        FieldElement::one(),
-        rhs,
-    )
+    &constraints::mul_with_witness(evaluator, condition, &(lhs - rhs)) + rhs
 }

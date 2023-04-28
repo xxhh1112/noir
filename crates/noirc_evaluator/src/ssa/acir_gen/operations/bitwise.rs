@@ -58,11 +58,7 @@ pub(super) fn simplify_bitwise(
             if field.is_zero() {
                 var.clone()
             } else {
-                InternalVar::from(constraints::subtract(
-                    &Expression::from_field(field),
-                    FieldElement::one(),
-                    var.expression(),
-                ))
+                InternalVar::from(field - var.expression().clone())
             }
         }
         BinaryOp::Or => {
@@ -96,16 +92,16 @@ pub(super) fn evaluate_bitwise(
                 return constraints::mul_with_witness(evaluator, lhs.expression(), rhs.expression())
             }
             BinaryOp::Xor => {
-                let sum = constraints::add(lhs.expression(), FieldElement::one(), rhs.expression());
+                let sum = lhs.expression() + rhs.expression();
                 let mul =
                     constraints::mul_with_witness(evaluator, lhs.expression(), rhs.expression());
-                return constraints::subtract(&sum, FieldElement::from(2_i128), &mul);
+                return sum.add_mul(-FieldElement::from(2_i128), &mul);
             }
             BinaryOp::Or => {
-                let sum = constraints::add(lhs.expression(), FieldElement::one(), rhs.expression());
+                let sum = lhs.expression() + rhs.expression();
                 let mul =
                     constraints::mul_with_witness(evaluator, lhs.expression(), rhs.expression());
-                return constraints::subtract(&sum, FieldElement::one(), &mul);
+                return &sum - &mul;
             }
             _ => unreachable!(),
         }
@@ -125,16 +121,8 @@ pub(super) fn evaluate_bitwise(
         BinaryOp::And => acvm::acir::BlackBoxFunc::AND,
         BinaryOp::Xor => acvm::acir::BlackBoxFunc::XOR,
         BinaryOp::Or => {
-            a_witness = evaluator.create_intermediate_variable(constraints::subtract(
-                &Expression::from_field(max),
-                FieldElement::one(),
-                &Expression::from(a_witness),
-            ));
-            b_witness = evaluator.create_intermediate_variable(constraints::subtract(
-                &Expression::from_field(max),
-                FieldElement::one(),
-                &Expression::from(b_witness),
-            ));
+            a_witness = evaluator.create_intermediate_variable(max - Expression::from(a_witness));
+            b_witness = evaluator.create_intermediate_variable(max - Expression::from(b_witness));
             // We do not have an OR gate yet, so we use the AND gate
             acvm::acir::BlackBoxFunc::AND
         }
@@ -152,11 +140,7 @@ pub(super) fn evaluate_bitwise(
     evaluator.opcodes.push(gate);
 
     if opcode == BinaryOp::Or {
-        constraints::subtract(
-            &Expression::from_field(max),
-            FieldElement::one(),
-            &Expression::from(result),
-        )
+        max - Expression::from(result)
     } else {
         Expression::from(result)
     }

@@ -43,21 +43,13 @@ pub(crate) fn evaluate(
             BinaryOp::Add | BinaryOp::SafeAdd => {
                 let l_c = acir_gen.var_cache.get_or_compute_internal_var_unwrap(binary.lhs, evaluator, ctx);
                 let r_c = acir_gen.var_cache.get_or_compute_internal_var_unwrap(binary.rhs, evaluator, ctx);
-                InternalVar::from(constraints::add(
-                    l_c.expression(),
-                    FieldElement::one(),
-                    r_c.expression(),
-                ))
+                InternalVar::from(l_c.expression() + r_c.expression())
             },
             BinaryOp::Sub { max_rhs_value } | BinaryOp::SafeSub { max_rhs_value } => {
                 let l_c = acir_gen.var_cache.get_or_compute_internal_var_unwrap(binary.lhs, evaluator, ctx);
                 let r_c = acir_gen.var_cache.get_or_compute_internal_var_unwrap(binary.rhs, evaluator, ctx);
                 if res_type == ObjectType::native_field() {
-                    InternalVar::from(constraints::subtract(
-                        l_c.expression(),
-                        FieldElement::one(),
-                        r_c.expression(),
-                    ))
+                    InternalVar::from(l_c.expression() - r_c.expression())
                 } else {
                     //we need the type of rhs and its max value, then:
                     //lhs-rhs+k*2^bit_size where k=ceil(max_value/2^bit_size)
@@ -69,21 +61,13 @@ pub(crate) fn evaluate(
                     }
                     k = &k * r_big;
                     let f = FieldElement::from_be_bytes_reduce(&k.to_bytes_be());
-                    let mut sub_expr = constraints::subtract(
-                        l_c.expression(),
-                        FieldElement::one(),
-                        r_c.expression(),
-                    );
+                    let mut sub_expr = l_c.expression() - r_c.expression();
                     sub_expr.q_c += f;
                     let mut sub_var = sub_expr.into();
                     //TODO: uses interval analysis for more precise check
                     if let Some(lhs_const) = l_c.to_const() {
                         if max_rhs_value <= &BigUint::from_bytes_be(&lhs_const.to_be_bytes()) {
-                            sub_var = InternalVar::from(constraints::subtract(
-                                l_c.expression(),
-                                FieldElement::one(),
-                                r_c.expression(),
-                            ));
+                            sub_var = InternalVar::from(l_c.expression() - r_c.expression());
                         }
                     }
                     sub_var
@@ -151,13 +135,13 @@ pub(crate) fn evaluate(
                 } else {
                     //TODO avoid creating witnesses here.
                     let x_witness = acir_gen.var_cache.get_or_compute_witness(r_c, evaluator).expect("unexpected constant expression"); 
-                    let inverse = Expression::from(constraints::evaluate_inverse(
+                    let inverse = constraints::evaluate_inverse(
                         x_witness, &predicate, evaluator,
-                    ));
+                    );
                     InternalVar::from(constraints::mul_with_witness(
                         evaluator,
                         l_c.expression(),
-                        &inverse,
+                        &inverse.into(),
                     ))
                 }
             }
@@ -197,7 +181,7 @@ pub(crate) fn evaluate(
                     false,
                     evaluator,
                 );
-                constraints::subtract(&Expression::one(), FieldElement::one(), &e).into()
+                (FieldElement::one()- e).into()
             }
             BinaryOp::Slt => {
                 let l_c = acir_gen.var_cache.get_or_compute_internal_var_unwrap(binary.lhs, evaluator, ctx);
@@ -217,7 +201,7 @@ pub(crate) fn evaluate(
                     true,
                     evaluator,
                 );
-                constraints::subtract(&Expression::one(), FieldElement::one(), &e).into()
+                (FieldElement::one() - e).into()
             }
             BinaryOp::Lt | BinaryOp::Lte => {
                 // TODO Create an issue to change this function to return a RuntimeErrorKind

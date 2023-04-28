@@ -1,13 +1,9 @@
 use acvm::{
     acir::native_types::Expression,
     acir::{circuit::opcodes::Opcode as AcirOpcode, native_types::Witness},
-    FieldElement,
 };
 
-use crate::{
-    ssa::acir_gen::constraints::{add, mul_with_witness, subtract},
-    Evaluator,
-};
+use crate::{ssa::acir_gen::constraints::mul_with_witness, Evaluator};
 
 // Generate gates which ensure that out_expr is a permutation of in_expr
 // Returns the control bits of the sorting network used to generate the constrains
@@ -20,7 +16,7 @@ pub(crate) fn evaluate_permutation(
     let (w, b) = permutation_layer(in_expr, &bits, true, evaluator);
     // we constrain the network output to out_expr
     for (b, o) in b.iter().zip(out_expr) {
-        evaluator.push_opcode(AcirOpcode::Arithmetic(subtract(b, FieldElement::one(), o)));
+        evaluator.push_opcode(AcirOpcode::Arithmetic(b - o));
     }
     w
 }
@@ -36,7 +32,7 @@ pub(crate) fn evaluate_permutation_with_witness(
     debug_assert_eq!(w, *bits);
     // we constrain the network output to out_expr
     for (b, o) in b.iter().zip(out_expr) {
-        evaluator.opcodes.push(AcirOpcode::Arithmetic(subtract(b, FieldElement::one(), o)));
+        evaluator.opcodes.push(AcirOpcode::Arithmetic(b - o));
     }
 }
 
@@ -74,15 +70,12 @@ fn permutation_layer(
     let mut in_sub2 = Vec::new();
     for i in 0..n1 {
         //q = c*(a2-a1);
-        let intermediate = mul_with_witness(
-            evaluator,
-            &conf[i].into(),
-            &subtract(&in_expr[2 * i + 1], FieldElement::one(), &in_expr[2 * i]),
-        );
+        let intermediate =
+            mul_with_witness(evaluator, &conf[i].into(), &(&in_expr[2 * i + 1] - &in_expr[2 * i]));
         //b1=a1+q
-        in_sub1.push(add(&intermediate, FieldElement::one(), &in_expr[2 * i]));
+        in_sub1.push(&intermediate + &in_expr[2 * i]);
         //b2=a2-q
-        in_sub2.push(subtract(&in_expr[2 * i + 1], FieldElement::one(), &intermediate));
+        in_sub2.push(&in_expr[2 * i + 1] - &intermediate);
     }
     if n % 2 == 1 {
         in_sub2.push(in_expr.last().unwrap().clone());
@@ -97,10 +90,9 @@ fn permutation_layer(
     for i in 0..(n - 1) / 2 {
         let c = if generate_witness { evaluator.add_witness_to_cs() } else { bits[n1 + i] };
         conf.push(c);
-        let intermediate =
-            mul_with_witness(evaluator, &c.into(), &subtract(&b2[i], FieldElement::one(), &b1[i]));
-        out_expr.push(add(&intermediate, FieldElement::one(), &b1[i]));
-        out_expr.push(subtract(&b2[i], FieldElement::one(), &intermediate));
+        let intermediate = mul_with_witness(evaluator, &c.into(), &(&b2[i] - &b1[i]));
+        out_expr.push(&intermediate + &b1[i]);
+        out_expr.push(&b2[i] - &intermediate);
     }
     if n % 2 == 0 {
         out_expr.push(b1.last().unwrap().clone());

@@ -1,10 +1,8 @@
-use acvm::{
-    acir::circuit::opcodes::Opcode as AcirOpcode, acir::native_types::Expression, FieldElement,
-};
+use acvm::{acir::circuit::opcodes::Opcode as AcirOpcode, FieldElement};
 
 use crate::{
     ssa::{
-        acir_gen::{constraints, internal_var_cache::InternalVarCache, InternalVar},
+        acir_gen::{internal_var_cache::InternalVarCache, InternalVar},
         context::SsaContext,
         node::NodeId,
     },
@@ -18,8 +16,7 @@ pub(crate) fn evaluate(
     ctx: &SsaContext,
 ) -> Option<InternalVar> {
     let value = var_cache.get_or_compute_internal_var_unwrap(*value, evaluator, ctx);
-    let subtract =
-        constraints::subtract(&Expression::one(), FieldElement::one(), value.expression());
+    let subtract = FieldElement::one() - value.expression().clone();
     evaluator.push_opcode(AcirOpcode::Arithmetic(subtract));
     Some(value)
 }
