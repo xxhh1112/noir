@@ -3,7 +3,10 @@ use noirc_errors::Span;
 
 use crate::{
     hir_def::{
-        expr::{self, HirArrayLiteral, HirBinaryOp, HirExpression, HirLiteral},
+        expr::{
+            self, HirArrayLiteral, HirBinaryOp, HirCallExpression, HirExpression, HirLiteral,
+            HirMemberAccess, HirMethodCallExpression,
+        },
         types::Type,
     },
     node_interner::{ExprId, FuncId},
@@ -112,34 +115,7 @@ impl<'interner> TypeChecker<'interner> {
                 let span = self.interner.expr_span(expr_id);
                 self.bind_function_type(function, args, span)
             }
-            HirExpression::MethodCall(method_call) => {
-                let object_type = self.check_expression(&method_call.object);
-                let method_name = method_call.method.0.contents.as_str();
-                match self.lookup_method(object_type.clone(), method_name, expr_id) {
-                    Some(method_id) => {
-                        let mut args =
-                            vec![(object_type, self.interner.expr_span(&method_call.object))];
-                        let mut arg_types = vecmap(&method_call.arguments, |arg| {
-                            let typ = self.check_expression(arg);
-                            (typ, self.interner.expr_span(arg))
-                        });
-                        args.append(&mut arg_types);
-
-                        // Desugar the method call into a normal, resolved function call
-                        // so that the backend doesn't need to worry about methods
-                        let location = method_call.location;
-                        let (function_id, function_call) =
-                            method_call.into_function_call(method_id, location, self.interner);
-
-                        let span = self.interner.expr_span(expr_id);
-                        let ret = self.check_method_call(&function_id, &method_id, args, span);
-
-                        self.interner.replace_expr(expr_id, function_call);
-                        ret
-                    }
-                    None => Type::Error,
-                }
-            }
+            HirExpression::MethodCall(method_call) => self.check_method_call(method_call, expr_id),
             HirExpression::Cast(cast_expr) => {
                 // Evaluate the LHS
                 let lhs_type = self.check_expression(&cast_expr.lhs);
@@ -338,9 +314,59 @@ impl<'interner> TypeChecker<'interner> {
         }
     }
 
+    fn check_method_call(&mut self, call: HirMethodCallExpression, expr_id: &ExprId) -> Type {
+        let object_type = self.check_expression(&call.object);
+        let method_name = call.method.0.contents.as_str();
+        let span = self.interner.expr_span(expr_id);
+
+        // The args Vec contains all args of the method, including the object.
+        let object_span = self.interner.expr_span(&call.object);
+        let mut args = vec![(object_type.clone(), object_span)];
+
+        for arg in &call.arguments {
+            let typ = self.check_expression(arg);
+            args.push((typ, self.interner.expr_span(arg)));
+        }
+
+        // Try to lookup a method first
+        if let Some(method_id) = self.lookup_method(object_type.clone(), method_name, expr_id) {
+            // Desugar the method call into a normal, resolved function call
+            // so that the backend doesn't need to worry about methods
+            let location = call.location;
+            let (function_id, function_call) =
+                call.into_function_call(method_id, location, self.interner);
+
+            let ret = self.bind_method_call(&function_id, &method_id, args, span);
+            self.interner.replace_expr(expr_id, function_call);
+            return ret;
+        }
+
+        // If we did not find a method, look for a field with a function type
+        if let Some((function_type, _)) = self.check_field_access(&object_type, method_name, span) {
+            let ret = self.bind_function_type(function_type, args, span);
+            let new_function_call = self.foo(call);
+            self.interner.replace_expr(expr_id, new_function_call);
+            return ret;
+        }
+
+        Type::Error
+    }
+
+    fn foo(&mut self, call: HirMethodCallExpression) -> HirExpression {
+        let lhs = call.object;
+        let rhs = call.method;
+        let func = HirExpression::MemberAccess(HirMemberAccess { lhs, rhs });
+        let func = self.interner.push_expr(func);
+
+        let arguments = call.arguments;
+        let location = call.location;
+
+        HirExpression::Call(HirCallExpression { func, arguments, location })
+    }
+
     // We need a special function to type check method calls since the method
     // is not a Expression::Ident it must be manually instantiated here
-    fn check_method_call(
+    fn bind_method_call(
         &mut self,
         function_ident_id: &ExprId,
         func_id: &FuncId,
