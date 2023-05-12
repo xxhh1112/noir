@@ -7,7 +7,7 @@ fn sha256<N>(_input : [u8; N]) -> [u8; 32] {}
 fn blake2s<N>(_input : [u8; N]) -> [u8; 32] {}
 
 #[foreign(pedersen)]
-fn pedersen<N>(_input : [Field; N]) -> [Field; 2] {}
+fn pedersen<N>(_input : [Field; N], _domain_separator: u32) -> [Field; 2] {}
 
 #[foreign(hash_to_field_128_security)]
 fn hash_to_field<N>(_input : [Field; N]) -> Field {}

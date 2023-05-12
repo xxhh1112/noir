@@ -113,6 +113,7 @@ pub(crate) fn evaluate(
                 },
                 BlackBoxFunc::Pedersen => BlackBoxFuncCall::Pedersen {
                     inputs: resolve_array(&args[0], acir_gen, ctx, evaluator),
+                    domain_separator: ctx.get_as_constant(args[1]).unwrap().to_u128() as u32,
                     outputs: outputs.to_vec(),
                 },
                 BlackBoxFunc::FixedBaseScalarMul => BlackBoxFuncCall::FixedBaseScalarMul {
