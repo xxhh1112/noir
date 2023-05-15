@@ -38,7 +38,7 @@ color-eyre = "0.6.2"
 
 # Backends
 #acvm-backend-barretenberg = { git = "https://github.com/noir-lang/aztec_backend", rev = "0aa72dec1367b4f546ba96a83894b8ae062240f4", default-features = false }
-acvm-backend-barretenberg = { path="../../../aztec_backend", default-features = false }
+acvm-backend-barretenberg = { git = "https://github.com/noir-lang/aztec_backend", rev = "d69fa9b36d90f1a7830f8fd2f170e25a7d583ded", default-features = false }
 
 
 [dev-dependencies]
