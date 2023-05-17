@@ -72,7 +72,7 @@ impl ProofSystemCompiler for ConcreteBackend {
         &self,
         _circuit: &acvm::acir::circuit::Circuit,
     ) -> Result<(Vec<u8>, Vec<u8>), Self::Error> {
-        todo!()
+        Ok((Vec::new(), Vec::new()))
     }
 
     fn prove_with_pk(
