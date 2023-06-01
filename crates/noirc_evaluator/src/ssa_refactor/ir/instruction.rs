@@ -118,7 +118,7 @@ impl Instruction {
         match self {
             Instruction::Binary(binary) => binary.result_type(),
             Instruction::Cast(_, typ) => InstructionResultType::Known(*typ),
-            Instruction::Allocate { .. } => InstructionResultType::Known(Type::Reference),
+            Instruction::Allocate { size } => InstructionResultType::Unknown,
             Instruction::Not(value) | Instruction::Truncate { value, .. } => {
                 InstructionResultType::Operand(*value)
             }

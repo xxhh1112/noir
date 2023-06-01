@@ -181,11 +181,19 @@ impl<'a> FunctionContext<'a> {
     pub(super) fn convert_non_tuple_type(typ: &ast::Type) -> Type {
         match typ {
             ast::Type::Field => Type::field(),
-            ast::Type::Array(_, _) => Type::Reference,
+            ast::Type::Array(length, element) => {
+                let element = Box::new(Self::convert_non_tuple_type(element));
+                let length = (*length).try_into().expect("Expected array length to fit into a u32");
+                Type::Reference { element, length }
+            },
             ast::Type::Integer(Signedness::Signed, bits) => Type::signed(*bits),
             ast::Type::Integer(Signedness::Unsigned, bits) => Type::unsigned(*bits),
             ast::Type::Bool => Type::unsigned(1),
-            ast::Type::String(_) => Type::Reference,
+            ast::Type::String(length) => {
+                let element = Box::new(Type::char());
+                let length = (*length).try_into().expect("Expected array length to fit into a u32");
+                Type::Reference { element, length }
+            },
             ast::Type::Unit => Type::Unit,
             ast::Type::Tuple(_) => panic!("convert_non_tuple_type called on a tuple: {typ}"),
             ast::Type::Function(_, _) => Type::Function,
@@ -193,7 +201,7 @@ impl<'a> FunctionContext<'a> {
             // How should we represent Vecs?
             // Are they a struct of array + length + capacity?
             // Or are they just references?
-            ast::Type::Vec(_) => Type::Reference,
+            ast::Type::Vec(_) => todo!("SSA-gen for vector types"),
         }
     }
 

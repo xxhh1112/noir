@@ -14,13 +14,13 @@ pub(crate) enum NumericType {
 }
 
 /// All types representable in the IR.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     /// Represents numeric types in the IR, including field elements
     Numeric(NumericType),
 
     /// A reference to some value, such as an array
-    Reference,
+    Reference { element: Box<Type>, length: u32 },
 
     /// A function that may be called directly
     Function,
@@ -45,6 +45,11 @@ impl Type {
         Type::unsigned(1)
     }
 
+    /// Creates the character type, represented as a u8.
+    pub(crate) fn char() -> Type {
+        Type::unsigned(8)
+    }
+
     /// Creates the native field type.
     pub(crate) fn field() -> Type {
         Type::Numeric(NumericType::NativeField)
@@ -55,7 +60,7 @@ impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Type::Numeric(numeric) => numeric.fmt(f),
-            Type::Reference => write!(f, "reference"),
+            Type::Reference { element, length } => write!(f, "[{element}; {length}]"),
             Type::Function => write!(f, "function"),
             Type::Unit => write!(f, "unit"),
         }
