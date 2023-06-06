@@ -11,7 +11,7 @@ impl BrilligArtifact {
     // Link some compiled brillig bytecode with its referenced artifacts
     pub(crate) fn link(&mut self, obj: &BrilligArtifact) -> Vec<BrilligOpcode> {
         self.link_with(obj);
-        self.byte_code.clone()
+        dbg!(self.byte_code.clone())
     }
 
     // Link with a brillig artifact
