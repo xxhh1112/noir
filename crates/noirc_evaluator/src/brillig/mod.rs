@@ -3,10 +3,7 @@ pub(crate) mod brillig_ir;
 
 use self::{brillig_gen::convert_ssa_function, brillig_ir::artifact::BrilligArtifact};
 use crate::ssa_refactor::{
-    ir::{
-        basic_block::BasicBlockId,
-        function::{Function, FunctionId, RuntimeType},
-    },
+    ir::function::{Function, FunctionId, RuntimeType},
     ssa_gen::Ssa,
 };
 use std::collections::HashMap;
