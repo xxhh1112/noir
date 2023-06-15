@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::brillig::{brillig_gen::BrilligGen, Brillig};
+use crate::brillig::{Brillig, brillig_ir::artifact::BrilligArtifact};
 
 use self::acir_ir::{
     acir_variable::{AcirContext, AcirType, AcirVar},
@@ -160,7 +160,9 @@ impl Context {
             }
             Instruction::Constrain(value_id) => {
                 let constrain_condition = self.convert_numeric_value(*value_id, dfg);
-                self.acir_context.assert_eq_one(constrain_condition);
+                self.acir_context
+                    .assert_eq_one(constrain_condition)
+                    .expect("add Result types to all methods so errors bubble up");
             }
             Instruction::Cast(value_id, typ) => {
                 let result_acir_var = self.convert_ssa_cast(value_id, typ, dfg);
@@ -176,14 +178,13 @@ impl Context {
                                 "expected an intrinsic/brillig call, but found {func:?}. All ACIR methods should be inlined"
                             ),
                             RuntimeType::Brillig => {
-                                let inputs = vecmap(arguments, |arg| self.convert_value(*arg, dfg));
+                                 let inputs = vecmap(arguments, |arg| self.convert_value(*arg, dfg));
 
                                 // Generate the brillig code of the function
-                                let brillig_gen = BrilligGen::new(*id);
-                                let mut obj = brillig_gen.initialize_entry_function(arguments.len());
-                                let code = obj.link(*id, brillig, result_ids.len());
+                                let code = BrilligArtifact::new(*id).link(*id, &brillig, result_ids.len());
 
                                 let outputs: Vec<AcirType> = vecmap(result_ids, |result_id| dfg.type_of_value(*result_id).into());
+
                                 let output_values = self.acir_context.brillig(code, inputs, outputs);
                                 // Compiler sanity check
                                 assert_eq!(result_ids.len(), output_values.len(), "ICE: The number of Brillig output values should match the result ids in SSA");
@@ -191,6 +192,23 @@ impl Context {
                                 for result in result_ids.iter().zip(output_values) {
                                     self.ssa_values.insert(*result.0, result.1);
                                 }
+                             
+                                // let inputs = vecmap(arguments, |arg| self.convert_value(*arg, dfg));
+
+                                // // Generate the brillig code of the function
+                                // let brillig_gen = BrilligGen::new(*id);
+                                
+                                // let mut obj = brillig_gen.initialize_entry_function(arguments.len());
+                                // let code = obj.link(*id, brillig, result_ids.len());
+
+                                // let outputs: Vec<AcirType> = vecmap(result_ids, |result_id| dfg.type_of_value(*result_id).into());
+                                // let output_values = self.acir_context.brillig(code, inputs, outputs);
+                                // // Compiler sanity check
+                                // assert_eq!(result_ids.len(), output_values.len(), "ICE: The number of Brillig output values should match the result ids in SSA");
+
+                                // for result in result_ids.iter().zip(output_values) {
+                                //     self.ssa_values.insert(*result.0, result.1);
+                                // }
                             }
                         }
                     }

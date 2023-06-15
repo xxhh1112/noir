@@ -8,7 +8,7 @@ pub(crate) mod artifact;
 
 use crate::ssa_refactor::ir::{basic_block::BasicBlockId, function::FunctionId};
 
-use self::artifact::{BrilligArtifact, UnresolvedLocation};
+use self::artifact::{BrilligArtifact, UnresolvedJumpLocation};
 use acvm::{
     acir::brillig_vm::{
         BinaryFieldOp, BinaryIntOp, Opcode as BrilligOpcode, RegisterIndex, RegisterValueOrArray,
@@ -49,13 +49,30 @@ impl SpecialRegisters {
         RegisterIndex::from(SpecialRegisters::Alloc as usize)
     }
 }
+/// Integer arithmetic in Brillig is limited to 127 bit
+/// integers.
+///
+/// We could lift this in the future and have Brillig
+/// do big integer arithmetic when it exceeds the field size
+/// or we could have users re-implement big integer arithmetic
+/// in Brillig.
+/// Since constrained functions do not have this property, it
+/// would mean that unconstrained functions will differ from
+/// constrained functions in terms of syntax compatibility.
+const BRILLIG_INTEGER_ARITHMETIC_BIT_SIZE: u32 = 127;
 
+#[derive(Debug, Clone)]
 /// Brillig context object that is used while constructing the
 /// Brillig bytecode.
 pub(crate) struct BrilligContext {
     obj: BrilligArtifact,
     /// A usize indicating the latest un-used register.
     latest_register: usize,
+    /// Context label, must be unique with respect to the function
+    /// being linked.
+    context_label: String,
+    /// Section label, used to separate sections of code
+    section_label: usize,
 }
 
 impl BrilligContext {
@@ -73,6 +90,8 @@ impl BrilligContext {
         BrilligContext {
             obj: BrilligArtifact::new(func),
             latest_register: SpecialRegisters::Len as usize,
+            context_label: String::new(),
+            section_label: 0,
         }
     }
 
@@ -100,27 +119,52 @@ impl BrilligContext {
     }
 
     /// Adds a label to the next opcode
-    pub(crate) fn add_label_to_next_opcode<T: ToString>(&mut self, label: T) {
+    pub(crate) fn enter_context<T: ToString>(&mut self, label: T) {
+        self.context_label = label.to_string();
+        self.section_label = 0;
+        // Add a context label to the next opcode
         self.obj.add_label_at_position(label.to_string(), self.obj.index_of_next_opcode());
+        // Add a section label to the next opcode
+        self.obj
+            .add_label_at_position(self.current_section_label(), self.obj.index_of_next_opcode());
+    }
+
+    /// Increments the section label and adds a section label to the next opcode
+    fn enter_next_section(&mut self) {
+        self.section_label += 1;
+        self.obj
+            .add_label_at_position(self.current_section_label(), self.obj.index_of_next_opcode());
+    }
+
+    /// Internal function used to compute the section labels
+    fn compute_section_label(&self, section: usize) -> String {
+        format!("{}-{}", self.context_label, section)
+    }
+
+    /// Returns the next section label
+    fn next_section_label(&self) -> String {
+        self.compute_section_label(self.section_label + 1)
+    }
+
+    /// Returns the current section label
+    fn current_section_label(&self) -> String {
+        self.compute_section_label(self.section_label)
     }
 
     /// Adds a unresolved `Jump` instruction to the bytecode.
-    pub(crate) fn jump_instruction(&mut self, target_label: BasicBlockId) {
-        self.add_unresolved_jump(
-            BrilligOpcode::Jump { location: 0 },
-            UnresolvedLocation::Label(self.block_label(target_label)),
-        );
+    pub(crate) fn jump_instruction<T: ToString>(&mut self, target_label: T) {
+        self.add_unresolved_jump(BrilligOpcode::Jump { location: 0 }, target_label.to_string());
     }
 
     /// Adds a unresolved `JumpIf` instruction to the bytecode.
-    pub(crate) fn jump_if_instruction(
+    pub(crate) fn jump_if_instruction<T: ToString>(
         &mut self,
         condition: RegisterIndex,
-        target_label: BasicBlockId,
+        target_label: T,
     ) {
         self.add_unresolved_jump(
             BrilligOpcode::JumpIf { condition, location: 0 },
-            UnresolvedLocation::Label(self.block_label(target_label)),
+            target_label.to_string(),
         );
     }
 
@@ -128,13 +172,13 @@ impl BrilligContext {
     fn add_unresolved_jump(
         &mut self,
         jmp_instruction: BrilligOpcode,
-        destination: UnresolvedLocation,
+        destination: UnresolvedJumpLocation,
     ) {
         self.obj.add_unresolved_jump(jmp_instruction, destination);
     }
 
     /// Adds a unresolved `Call` instruction to the bytecode.
-    fn add_unresolved_call(&mut self, destination: UnresolvedLocation, func: FunctionId) {
+    fn add_unresolved_call(&mut self, destination: UnresolvedJumpLocation, func: FunctionId) {
         self.obj.add_unresolved_call(BrilligOpcode::Call { location: 0 }, destination, func);
     }
 
@@ -150,12 +194,12 @@ impl BrilligContext {
     /// Emits brillig bytecode to jump to a trap condition if `condition`
     /// is false.
     pub(crate) fn constrain_instruction(&mut self, condition: RegisterIndex) {
-        // Jump to the relative location after the trap
         self.add_unresolved_jump(
             BrilligOpcode::JumpIf { condition, location: 0 },
-            UnresolvedLocation::Relative(2),
+            self.next_section_label(),
         );
         self.push_opcode(BrilligOpcode::Trap);
+        self.enter_next_section();
     }
 
     /// Processes a return instruction.
@@ -418,7 +462,7 @@ impl BrilligContext {
         &mut self,
         arguments: &[RegisterIndex],
         results: &[RegisterIndex],
-        function_entry_block_label: String,
+        function_entry_block_label: UnresolvedJumpLocation,
         func_id: FunctionId,
     ) {
         // Initialize the registers which will hold the value(s) returned from the call
@@ -465,7 +509,7 @@ impl BrilligContext {
         });
 
         // Call instruction
-        self.add_unresolved_call(UnresolvedLocation::Label(function_entry_block_label), func_id);
+        self.add_unresolved_call(function_entry_block_label, func_id);
 
         // Decrement depth_call
         let one = self.make_constant(1u128.into());
@@ -526,6 +570,33 @@ impl BrilligContext {
             );
             self.load_instruction(RegisterIndex::from(i), reg_adr);
         }
+    }
+    /// Emits a modulo instruction against 2**target_bit_size
+    ///
+    /// Integer arithmetic in Brillig is currently constrained to 127 bit integers.
+    /// We restrict the cast operation, so that integer types over 127 bits
+    /// cannot be created.
+    pub(crate) fn cast_instruction(
+        &mut self,
+        destination: RegisterIndex,
+        source: RegisterIndex,
+        target_bit_size: u32,
+    ) {
+        assert!(
+            target_bit_size <= BRILLIG_INTEGER_ARITHMETIC_BIT_SIZE,
+            "tried to cast to a bit size greater than allowed {target_bit_size}"
+        );
+
+        // The brillig VM performs all arithmetic operations modulo 2**bit_size
+        // So to cast any value to a target bit size we can just issue a no-op arithmetic operation
+        // With bit size equal to target_bit_size
+        let zero = self.make_constant(Value::from(FieldElement::zero()));
+        self.binary_instruction(
+            source,
+            zero,
+            destination,
+            BrilligBinaryOp::Integer { op: BinaryIntOp::Add, bit_size: target_bit_size },
+        );
     }
 }
 
