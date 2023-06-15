@@ -6,7 +6,9 @@ use crate::ssa_refactor::ir::{
     types::{NumericType, Type},
     value::{Value, ValueId},
 };
-use acvm::acir::brillig_vm::{BinaryFieldOp, BinaryIntOp, RegisterIndex, RegisterValueOrArray};
+use acvm::acir::brillig_vm::{
+    BinaryFieldOp, BinaryIntOp, RegisterIndex, RegisterValueOrArray, Value as BrilligValue,
+};
 use acvm::FieldElement;
 use iter_extended::vecmap;
 
@@ -104,8 +106,7 @@ impl<'block> BrilligBlock<'block> {
             };
             match param_type {
                 Type::Numeric(_) => {
-                    self.function_context
-                        .get_or_create_register(self.brillig_context, *param_id);
+                    self.function_context.get_or_create_register(self.brillig_context, *param_id);
                 }
                 Type::Array(_, size) => {
                     let pointer_register = self
@@ -281,12 +282,12 @@ impl<'block> BrilligBlock<'block> {
                 // converted to registers so we fetch from the cache.
                 self.function_context.get_or_create_register(self.brillig_context, value_id)
             }
-            Value::NumericConstant { constant, .. } => {
-                let register_index = self
-                    .function_context
-                    .get_or_create_register(self.brillig_context, value_id);
+            Value::NumericConstant { constant, typ } => {
+                let register_index =
+                    self.function_context.get_or_create_register(self.brillig_context, value_id);
 
-                self.brillig_context.const_instruction(register_index, (*constant).into());
+                self.brillig_context
+                    .const_instruction(register_index, constant_to_value(*constant, typ));
                 register_index
             }
             _ => {
@@ -405,5 +406,30 @@ pub(crate) fn convert_ssa_binary_op_to_brillig_binary_op(
     match bit_size_signedness {
         Some((bit_size, is_signed)) => binary_op_to_int_op(ssa_op, bit_size, is_signed),
         None => binary_op_to_field_op(ssa_op),
+    }
+}
+
+fn constant_to_value(constant: FieldElement, typ: &Type) -> BrilligValue {
+    match typ {
+        Type::Numeric(NumericType::Signed { bit_size }) => {
+            let maximum_value = (1u128 << (bit_size - 1)) - 1;
+            let maximum_field = FieldElement::from(maximum_value);
+
+            if constant > maximum_field {
+                let absolute_value = -constant;
+                let absolute_value = absolute_value.to_u128();
+
+                let negative_representation = (1u128 << bit_size) - absolute_value;
+                negative_representation.into()
+            } else {
+                constant.into()
+            }
+        }
+        Type::Numeric(NumericType::Unsigned { .. }) | Type::Numeric(NumericType::NativeField) => {
+            constant.into()
+        }
+        _ => {
+            unreachable!("type not supported for conversion into brillig value")
+        }
     }
 }
