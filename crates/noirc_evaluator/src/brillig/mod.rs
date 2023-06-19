@@ -1,7 +1,10 @@
 pub(crate) mod brillig_gen;
 pub(crate) mod brillig_ir;
 
-use self::{brillig_gen::convert_ssa_function, brillig_ir::artifact::BrilligArtifact};
+use self::{
+    brillig_gen::{brillig_block::BrilligBlock, convert_ssa_function},
+    brillig_ir::artifact::{BrilligArtifact, Label},
+};
 use crate::ssa_refactor::{
     ir::{
         basic_block::BasicBlockId,
@@ -35,6 +38,19 @@ impl Brillig {
     pub(crate) fn compile(&mut self, func: &Function) {
         let obj = convert_ssa_function(func, &self.ssa_function_id_to_block_id);
         self.ssa_function_to_brillig.insert(func.id(), obj);
+    }
+
+    // TODO: This is temporary and cannot be merged as is because
+    // TODO we are cloning the Brillig data-structure.
+    pub(crate) fn dependency_map(&self) -> HashMap<Label, BrilligArtifact> {
+        (self.ssa_function_id_to_block_id)
+            .iter()
+            .map(|(func_id, block_id)| {
+                let brillig_artifact = self.ssa_function_to_brillig[&func_id].clone();
+                let label = BrilligBlock::create_block_label(*func_id, *block_id);
+                (label, brillig_artifact)
+            })
+            .collect()
     }
 }
 

@@ -572,9 +572,9 @@ impl BrilligContext {
         // We do all the reverse operations of save_all_used_registers.
         // Iterate our registers in reverse
         for register in used_registers.iter().rev() {
+            self.load_instruction(*register, ReservedRegisters::stack_pointer());
             // Subtract one from our stack pointer
             self.usize_op(ReservedRegisters::stack_pointer(), BinaryIntOp::Sub, 1);
-            self.load_instruction(*register, ReservedRegisters::stack_pointer());
         }
     }
 
@@ -588,8 +588,8 @@ impl BrilligContext {
         let const_register = self.make_constant(Value::from(constant));
         self.binary_instruction(
             destination,
-            destination,
             const_register,
+            destination,
             BrilligBinaryOp::Integer { op, bit_size: BRILLIG_MEMORY_ADDRESSING_BIT_SIZE },
         );
         // Mark as no longer used for this purpose, frees for reuse

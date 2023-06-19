@@ -183,8 +183,8 @@ impl Context {
                                 let inputs = vecmap(arguments, |arg| self.convert_value(*arg, dfg));
 
                                 // Link the brillig code of the function using the artifacts and produce one stream of bytecode
-                                let code = BrilligArtifact::link(&brillig[*id]);
-
+                                let dependency_map: HashMap<String, BrilligArtifact> = brillig.dependency_map();
+                                let code = BrilligArtifact::link(&brillig[*id], &dependency_map);
                                 let outputs: Vec<AcirType> = vecmap(result_ids, |result_id| dfg.type_of_value(*result_id).into());
 
                                 let output_values = self.acir_context.brillig(code, inputs, outputs);

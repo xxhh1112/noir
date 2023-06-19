@@ -2072,6 +2072,7 @@ dependencies = [
  "acvm",
  "arena",
  "im",
+ "indexmap",
  "iter-extended",
  "noirc_abi",
  "noirc_errors",

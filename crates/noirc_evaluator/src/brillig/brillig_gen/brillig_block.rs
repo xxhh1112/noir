@@ -79,7 +79,7 @@ impl<'block> BrilligBlock<'block> {
     /// for us to create a unique label across functions and blocks.
     ///
     /// This is so that during linking there are no duplicates or labels being overwritten.
-    fn create_block_label(function_id: FunctionId, block_id: BasicBlockId) -> String {
+    pub(crate) fn create_block_label(function_id: FunctionId, block_id: BasicBlockId) -> String {
         format!("{}-{}", function_id, block_id)
     }
 

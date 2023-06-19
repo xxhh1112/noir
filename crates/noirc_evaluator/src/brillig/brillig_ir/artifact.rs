@@ -1,9 +1,9 @@
+use crate::brillig::brillig_ir::ReservedRegisters;
 use acvm::acir::brillig_vm::{
     BinaryFieldOp, BinaryIntOp, Opcode as BrilligOpcode, RegisterIndex, Value,
 };
-use std::collections::HashMap;
-
-use crate::brillig::brillig_ir::ReservedRegisters;
+use indexmap::IndexSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Default, Debug, Clone)]
 /// Artifacts resulting from the compilation of a function into brillig byte code.
@@ -12,7 +12,7 @@ pub(crate) struct BrilligArtifact {
     pub(crate) byte_code: Vec<BrilligOpcode>,
     /// The set of jumps that need to have their locations
     /// resolved.
-    unresolved_jumps: Vec<(JumpInstructionPosition, UnresolvedJumpLocation)>,
+    unresolved_jumps_and_calls: Vec<(JumpInstructionPosition, UnresolvedJumpLocation)>,
     /// A map of labels to their position in byte code.
     labels: HashMap<Label, OpcodeLocation>,
     /// Set of labels which are external to the bytecode.
@@ -21,7 +21,9 @@ pub(crate) struct BrilligArtifact {
     /// which are defined in other bytecode, that this bytecode has called.
     /// TODO: perhaps we should combine this with the `unresolved_jumps` field
     /// TODO: and have an enum which indicates whether the jump is internal or external
-    unresolved_external_call_labels: Vec<(JumpInstructionPosition, UnresolvedJumpLocation)>,
+    // unresolved_external_call_labels: Vec<(JumpInstructionPosition, UnresolvedJumpLocation)>,
+    /// Labels that need to be imported from other bytecode, since they are called by this bytecode.
+    external_labels: IndexSet<Label>,
     /// The number of return values that this function will return.
     number_of_return_parameters: usize,
 
@@ -59,11 +61,11 @@ impl BrilligArtifact {
     ) -> BrilligArtifact {
         BrilligArtifact {
             byte_code: Vec::new(),
-            unresolved_jumps: Vec::new(),
+            unresolved_jumps_and_calls: Vec::new(),
             labels: HashMap::new(),
-            unresolved_external_call_labels: Vec::new(),
             number_of_return_parameters,
             number_of_arguments,
+            external_labels: IndexSet::new(),
         }
     }
 
@@ -75,7 +77,10 @@ impl BrilligArtifact {
     /// TODO: This method could be renamed to `link_and_resolve_jumps`
     /// TODO: We could make this consume self, so the Clone is explicitly
     /// TODO: done by the caller
-    pub(crate) fn link(artifact_to_append: &BrilligArtifact) -> Vec<BrilligOpcode> {
+    pub(crate) fn link(
+        artifact_to_append: &BrilligArtifact,
+        dependency_map: &HashMap<Label, BrilligArtifact>,
+    ) -> Vec<BrilligOpcode> {
         let mut linked_artifact = BrilligArtifact::default();
 
         linked_artifact.entry_point_instruction(artifact_to_append.number_of_arguments);
@@ -84,11 +89,85 @@ impl BrilligArtifact {
         // are still correct.
         linked_artifact.append_artifact(artifact_to_append);
 
+        // Resolve external dependencies/labels for this linked artifact
+        // If those dependencies have linked artifacts that need to be resolved
+        // then this process is done recursively
+        let mut resolved = HashSet::new();
         linked_artifact.exit_point_instruction(artifact_to_append.number_of_return_parameters);
+        linked_artifact.resolve_external_dependencies(&mut resolved, dependency_map);
 
         linked_artifact.resolve_jumps();
 
         linked_artifact.byte_code.clone()
+    }
+    /// Resolve external labels in this artifact.
+    ///
+    /// TODO: Explain how this deals with circular dependencies of artifacts
+    /// TODO and or how we avoid this/ perhaps this is an invalid artifact that should
+    /// TODO never happen, even when a function calls itself, or when there is a circular dependency
+    /// TODO between two/three functions
+    ///
+    fn resolve_external_dependencies(
+        &mut self,
+        // labels to resolve
+        //
+        // This ensures that we do not append unused artifacts to our assembly
+        //
+        // Note: We do not use a HashSet because we want to preserve the order
+        // in which the labels are resolved. This is important because this means
+        // we get the same bytecode output on different runs.
+        // to_resolve: &mut Vec<Label>,
+        // resolved external labels
+        // This ensures that once we've resolved a label by
+        // appending the artifact to the current linked artifact
+        // we do not append it again.
+        resolved: &mut HashSet<Label>,
+        // dependency map of all compiled brillig artifacts
+        dependency_map: &HashMap<Label, BrilligArtifact>,
+    ) {
+        dbg!(&self.external_labels);
+        loop {
+            let external_label_to_resolve = match self.external_labels.pop() {
+                Some(label_to_resolve) => label_to_resolve,
+                None => {
+                    break;
+                }
+            };
+
+            // If the label has already been resolved, then we do not need to do anything
+            if resolved.contains(&external_label_to_resolve) {
+                continue;
+            }
+
+            // If the label is not in the dependency map, then we have a panic
+            // as the label is not defined in any of the artifacts.
+
+            if !dependency_map.contains_key(&external_label_to_resolve) {
+                unreachable!(
+                    "the label {external_label_to_resolve} is not defined in any of the artifacts"
+                );
+            }
+
+            // If the label is in the dependency map, then we need to resolve it
+            // by appending the artifact to the current linked artifact
+            // Then adding this artifact's external labels to the list of labels to resolve
+            let artifact_to_append = dependency_map.get(&external_label_to_resolve).unwrap();
+            self.append_artifact(artifact_to_append);
+
+            // TODO: Can we make this more elegant.
+            self.byte_code.pop();
+            self.push_opcode(BrilligOpcode::Return);
+
+            // Add the labels of the artifact to the list of labels to resolve
+            // This ensures that we resolve all external dependencies of external dependencies
+            // self.external_labels.extend(artifact_to_append.external_labels.iter().cloned());
+
+            // Add this artifact to the list of resolved artifacts and resolve its artifacts
+            //
+            // If we do not add it before resolving its dependencies, then if a dependency depends
+            // on this appended artifact, it will append its artifact and we end up in an infinite loop
+            resolved.insert(dbg!(external_label_to_resolve));
+        }
     }
 
     /// Adds the instructions needed to handle entry point parameters
@@ -144,8 +223,8 @@ impl BrilligArtifact {
     /// Brillig artifact (self).
     fn append_artifact(&mut self, obj: &BrilligArtifact) {
         let offset = self.index_of_next_opcode();
-        for (jump_label, jump_location) in &obj.unresolved_jumps {
-            self.unresolved_jumps.push((jump_label + offset, jump_location.clone()));
+        for (jump_label, jump_location) in &obj.unresolved_jumps_and_calls {
+            self.unresolved_jumps_and_calls.push((jump_label + offset, jump_location.clone()));
         }
 
         for (label_id, position_in_bytecode) in &obj.labels {
@@ -153,6 +232,7 @@ impl BrilligArtifact {
             assert!(old_value.is_none(), "overwriting label {label_id} {old_value:?}");
         }
 
+        self.external_labels.extend(obj.external_labels.iter().cloned());
         self.byte_code.extend_from_slice(&obj.byte_code);
     }
 
@@ -172,7 +252,7 @@ impl BrilligArtifact {
             "expected a jump instruction, but found {jmp_instruction:?}"
         );
 
-        self.unresolved_jumps.push((self.index_of_next_opcode(), destination));
+        self.unresolved_jumps_and_calls.push((self.index_of_next_opcode(), destination));
         self.push_opcode(jmp_instruction);
     }
     /// Adds a unresolved external call that will be fixed once linking has been done.
@@ -182,9 +262,10 @@ impl BrilligArtifact {
         destination: UnresolvedJumpLocation,
     ) {
         // TODO: Add a check to ensure that the opcode is a call instruction
-
-        self.unresolved_external_call_labels.push((self.index_of_next_opcode(), destination));
+        self.unresolved_jumps_and_calls.push((self.index_of_next_opcode(), destination.clone()));
         self.push_opcode(call_instruction);
+
+        self.external_labels.insert(destination);
     }
 
     /// Returns true if the opcode is a jump instruction
@@ -220,8 +301,8 @@ impl BrilligArtifact {
     /// Note: This should only be called once all blocks are processed and
     /// linkage with other bytecode has happened.
     fn resolve_jumps(&mut self) {
-        for (location_of_jump, unresolved_location) in &self.unresolved_jumps {
-            let resolved_location = self.labels[unresolved_location];
+        for (location_of_jump, unresolved_location) in &self.unresolved_jumps_and_calls {
+            let resolved_location = self.labels[dbg!(unresolved_location)];
 
             let jump_instruction = self.byte_code[*location_of_jump].clone();
             match jump_instruction {
@@ -242,6 +323,14 @@ impl BrilligArtifact {
 
                     self.byte_code[*location_of_jump] =
                         BrilligOpcode::JumpIf { condition, location: resolved_location };
+                }
+                BrilligOpcode::Call { location } => {
+                    assert_eq!(
+                        location, 0,
+                        "location is not zero, which means that the label does not need resolving"
+                    );
+                    self.byte_code[*location_of_jump] =
+                        BrilligOpcode::Call { location: resolved_location };
                 }
                 _ => unreachable!(
                     "all jump labels should point to a jump instruction in the bytecode"

@@ -17,6 +17,7 @@ thiserror.workspace = true
 num-bigint = "0.4"
 num-traits = "0.2.8"
 im = "15.1"
+indexmap = "*"
 
 [dev-dependencies]
-rand="0.8.5"
+rand = "0.8.5"
