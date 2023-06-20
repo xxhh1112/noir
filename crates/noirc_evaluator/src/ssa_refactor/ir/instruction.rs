@@ -121,6 +121,9 @@ pub(crate) enum Instruction {
     /// Creates a new array with the new value at the given index. All other elements are identical
     /// to those in the given array. This will not modify the original array.
     ArraySet { array: ValueId, index: ValueId, value: ValueId },
+
+    /// Creates a new array with the given elements
+    MakeArray { elements: im::Vector<ValueId> },
 }
 
 impl Instruction {
@@ -145,6 +148,7 @@ impl Instruction {
             Instruction::Load { .. } | Instruction::ArrayGet { .. } | Instruction::Call { .. } => {
                 InstructionResultType::Unknown
             }
+            Instruction::MakeArray { .. } => InstructionResultType::Unknown,
         }
     }
 
@@ -190,6 +194,9 @@ impl Instruction {
             Instruction::ArraySet { array, index, value } => {
                 Instruction::ArraySet { array: f(*array), index: f(*index), value: f(*value) }
             }
+            Instruction::MakeArray { elements } => {
+                Instruction::MakeArray { elements: elements.iter().copied().map(f).collect() }
+            },
         }
     }
 
@@ -229,6 +236,11 @@ impl Instruction {
             }
             Instruction::EnableSideEffects { condition } => {
                 f(*condition);
+            }
+            Instruction::MakeArray { elements } => {
+                for element in elements {
+                    f(*element);
+                }
             }
         }
     }
@@ -334,6 +346,7 @@ impl Instruction {
             Instruction::Load { .. } => None,
             Instruction::Store { .. } => None,
             Instruction::EnableSideEffects { .. } => None,
+            Instruction::MakeArray { .. } => None,
         }
     }
 }

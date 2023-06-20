@@ -244,6 +244,9 @@ impl Context {
             Instruction::Load { .. } => {
                 unreachable!("Expected all load instructions to be removed before acir_gen")
             }
+            Instruction::MakeArray { .. } => {
+                // Do nothing
+            },
         }
     }
 

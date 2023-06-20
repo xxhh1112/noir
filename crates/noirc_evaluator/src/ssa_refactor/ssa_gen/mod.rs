@@ -147,7 +147,7 @@ impl<'a> FunctionContext<'a> {
             });
         }
 
-        self.builder.array_constant(array, Rc::new(element_types)).into()
+        self.builder.insert_make_array(array, Rc::new(element_types)).into()
     }
 
     fn codegen_block(&mut self, block: &[Expression]) -> Values {

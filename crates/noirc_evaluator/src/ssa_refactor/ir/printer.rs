@@ -169,5 +169,9 @@ pub(crate) fn display_instruction(
                 show(*value)
             )
         }
+        Instruction::MakeArray { elements, .. } => {
+            let elements = vecmap(elements, |id| value(function, *id));
+            writeln!(f, "make_array [{}]", elements.join(", "))
+        }
     }
 }

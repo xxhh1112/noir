@@ -261,6 +261,12 @@ impl FunctionBuilder {
         self.insert_instruction(Instruction::ArraySet { array, index, value }, None).first()
     }
 
+    /// Insert a make_array instruction to create a new array with the given elements
+    pub(crate) fn insert_make_array(&mut self, elements: im::Vector<ValueId>, element_types: Rc<CompositeType>) -> ValueId {
+        let typ = Type::Array(element_types, elements.len());
+        self.insert_instruction(Instruction::MakeArray { elements }, Some(vec![typ])).first()
+    }
+
     /// Terminates the current block with the given terminator instruction
     fn terminate_block_with(&mut self, terminator: TerminatorInstruction) {
         self.current_function.dfg.set_block_terminator(self.current_block, terminator);

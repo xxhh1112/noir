@@ -44,6 +44,9 @@ pub(crate) struct DataFlowGraph {
     /// twice will return the same ValueId.
     constants: HashMap<(FieldElement, Type), ValueId>,
 
+    /// Maps an instruction id from an Instruction::MakeArray to the array that was created.
+    arrays: HashMap<InstructionId, (im::Vector<ValueId>, Rc<CompositeType>)>,
+
     /// Contains each function that has been imported into the current function.
     /// Each function's Value::Function is uniqued here so any given FunctionId
     /// will always have the same ValueId within this function.
@@ -121,8 +124,24 @@ impl DataFlowGraph {
         instruction_data: Instruction,
         ctrl_typevars: Option<Vec<Type>>,
     ) -> InstructionId {
+        let array = match &instruction_data {
+            Instruction::MakeArray { elements } => {
+                let element_types = match &ctrl_typevars.as_ref().unwrap()[0] {
+                    Type::Array(element_types, _) => element_types,
+                    _ => unreachable!(),
+                };
+                Some((elements.clone(), element_types.clone()))
+            }
+            _ => None,
+        };
+
         let id = self.instructions.insert(instruction_data);
         self.make_instruction_results(id, ctrl_typevars);
+
+        if let Some((elements, element_types)) = array {
+            self.arrays.insert(id, (elements, element_types));
+        }
+
         id
     }
 
@@ -323,6 +342,12 @@ impl DataFlowGraph {
         match &self.values[self.resolve(value)] {
             // Vectors are shared, so cloning them is cheap
             Value::Array { array, element_type } => Some((array.clone(), element_type.clone())),
+            Value::Instruction { instruction, .. } => {
+                match &self.instructions[*instruction] {
+                    Instruction::MakeArray { .. } => Some(self.arrays[instruction].clone()),
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
