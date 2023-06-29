@@ -154,13 +154,10 @@ impl ResolutionContext {
             if let Some(TerminatorInstruction::Return { return_values }) = terminator {
                 let mut non_functional_returns = Vec::with_capacity(return_values.len());
 
-                for return_value in return_values {
+                for (position, return_value) in return_values.iter().enumerate() {
                     if let Type::Function = new_function.dfg.type_of_value(*return_value) {
                         let function_id = find_function_parameter(return_value, &value_to_function);
-                        functional_returns.push(FunctionalReturn {
-                            index: functional_returns.len(),
-                            function_id,
-                        });
+                        functional_returns.push(FunctionalReturn { index: position, function_id });
                     } else {
                         non_functional_returns.push(*return_value);
                     }
