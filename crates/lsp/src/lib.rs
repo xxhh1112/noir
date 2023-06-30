@@ -249,8 +249,7 @@ fn on_did_save_text_document(
     let mut diagnostics = Vec::new();
 
     if let Some(new_path) = find_nearest_parent_file(&file_path, &["lib.nr", "main.nr"]) {
-        println!("Found file at path: {:?}", new_path);
-        // file_path = new_path;
+        file_path = new_path;
         // if let Some(stri) = file_path.as_os_str().to_str() {
         //     diagnostics.push(Diagnostic {
         //         range: Range {
@@ -262,11 +261,9 @@ fn on_did_save_text_document(
         //         ..Diagnostic::default()
         //     });
         // }
-    } else {
-        println!("No 'lib.nr' or 'main.nr' found in parent directories.");
     }
 
-    driver.create_local_crate(file_path.clone(), CrateType::Binary);
+    driver.create_local_crate(file_path, CrateType::Binary);
 
     let file_diagnostics = match driver.check_crate(false) {
         Ok(warnings) => warnings,
