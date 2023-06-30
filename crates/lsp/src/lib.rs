@@ -267,7 +267,8 @@ fn on_did_save_text_document(
         for FileDiagnostic { file_id, diagnostic } in file_diagnostics {
             // TODO Hack hack hack
             if fm.path(file_id).file_name() != actual_path.file_name()
-                && fm.path(file_id).file_name() != actual_path.parent().unwrap().file_name()
+                && actual_path.file_name().unwrap().to_str() != Some("main.nr")
+                && actual_path.file_name().unwrap().to_str() != Some("lib.nr")
             {
                 eprintln!(
                     "Problem parsing arguments: {} {}",
