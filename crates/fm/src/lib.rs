@@ -61,11 +61,17 @@ impl FileManager {
         // Unwrap as we ensure that all file_id's map to a corresponding file in the file map
         self.file_map.get_file(file_id).unwrap()
     }
-    fn path(&mut self, file_id: FileId) -> &Path {
+    // TODO hacked
+    pub fn path(&self, file_id: FileId) -> &Path {
         // Unwrap as we ensure that all file_ids are created by the file manager
         // So all file_ids will points to a corresponding path
         self.id_to_path.get(&file_id).unwrap().0.as_path()
     }
+    /// TODO hacks
+    // pub fn path_to_id(&self, path: &Path) -> Option<&FileId> {
+    //     let path_to_file = virtualize_path(path, FileType::Normal); // TODO unhack
+    //     self.path_to_id.get(&path_to_file)
+    // }
 
     pub fn resolve_path(&mut self, anchor: FileId, mod_name: &str) -> Result<FileId, String> {
         let mut candidate_files = Vec::new();

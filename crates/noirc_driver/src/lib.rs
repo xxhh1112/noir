@@ -184,11 +184,6 @@ impl Driver {
             CrateType::Library,
         );
         self.propagate_dep(aztec_crate, &CrateName::new("aztec3").unwrap());
-        let aztec_crate = self.create_non_local_crate(
-            "/Users/adomurad/sources/aztec3-packages/yarn-project/noir-contracts/src/contracts/noir-aztec3/src/lib.nr",
-            CrateType::Library,
-        );
-        self.propagate_dep(aztec_crate, &CrateName::new("aztec3").unwrap());
 
         let mut errors = vec![];
         CrateDefMap::collect_defs(LOCAL_CRATE, &mut self.context, &mut errors);

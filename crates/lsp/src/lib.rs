@@ -245,22 +245,12 @@ fn on_did_save_text_document(
     // The driver should not require knowledge of the backend; instead should be implemented as an independent pass (in nargo?)
     let mut driver = Driver::new(&Language::R1CS, Box::new(|_op| false));
 
-    let mut file_path = params.text_document.uri.to_file_path().unwrap();
+    let actual_path = params.text_document.uri.to_file_path().unwrap();
+    let mut file_path = actual_path.clone(); // TODO rename stuff
     let mut diagnostics = Vec::new();
 
     if let Some(new_path) = find_nearest_parent_file(&file_path, &["lib.nr", "main.nr"]) {
-        file_path = new_path;
-        // if let Some(stri) = file_path.as_os_str().to_str() {
-        //     diagnostics.push(Diagnostic {
-        //         range: Range {
-        //             start: Position { line: 0, character: 0 },
-        //             end: Position { line: 0, character: 0 },
-        //         },
-        //         severity: Some(DiagnosticSeverity::ERROR),
-        //         message: stri.to_string(),
-        //         ..Diagnostic::default()
-        //     });
-        // }
+        file_path = new_path; // TODO unhack
     }
 
     driver.create_local_crate(file_path, CrateType::Binary);
@@ -275,6 +265,17 @@ fn on_did_save_text_document(
         let files = fm.as_simple_files();
 
         for FileDiagnostic { file_id, diagnostic } in file_diagnostics {
+            // TODO Hack hack hack
+            if fm.path(file_id).file_name() != actual_path.file_name()
+                && fm.path(file_id).file_name() != actual_path.parent().unwrap().file_name()
+            {
+                eprintln!(
+                    "Problem parsing arguments: {} {}",
+                    fm.path(file_id).to_str().unwrap(),
+                    actual_path.to_str().unwrap()
+                );
+                continue; // HACK we list all errors, filter by hacky final path component
+            }
             // TODO(#1681): This file_id never be 0 because the "path" where it maps is the directory, not a file
             if file_id.as_usize() != 0 {
                 continue;
