@@ -1,6 +1,7 @@
 use std::{
     future::Future,
     ops::{self, ControlFlow},
+    path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -218,6 +219,24 @@ fn on_did_close_text_document(
     ControlFlow::Continue(())
 }
 
+/// Find the nearest parent file with given names.
+fn find_nearest_parent_file(path: &Path, filenames: &[&str]) -> Option<PathBuf> {
+    let mut current_path = path;
+
+    while let Some(parent_path) = current_path.parent() {
+        for filename in filenames {
+            let mut possible_file_path = parent_path.to_path_buf();
+            possible_file_path.push(filename);
+            if possible_file_path.is_file() {
+                return Some(possible_file_path);
+            }
+        }
+        current_path = parent_path;
+    }
+
+    None
+}
+
 fn on_did_save_text_document(
     state: &mut LspState,
     params: DidSaveTextDocumentParams,
@@ -226,11 +245,28 @@ fn on_did_save_text_document(
     // The driver should not require knowledge of the backend; instead should be implemented as an independent pass (in nargo?)
     let mut driver = Driver::new(&Language::R1CS, Box::new(|_op| false));
 
-    let file_path = &params.text_document.uri.to_file_path().unwrap();
-
-    driver.create_local_crate(file_path, CrateType::Binary);
-
+    let mut file_path = params.text_document.uri.to_file_path().unwrap();
     let mut diagnostics = Vec::new();
+
+    if let Some(new_path) = find_nearest_parent_file(&file_path, &["lib.nr", "main.nr"]) {
+        println!("Found file at path: {:?}", new_path);
+        // file_path = new_path;
+        // if let Some(stri) = file_path.as_os_str().to_str() {
+        //     diagnostics.push(Diagnostic {
+        //         range: Range {
+        //             start: Position { line: 0, character: 0 },
+        //             end: Position { line: 0, character: 0 },
+        //         },
+        //         severity: Some(DiagnosticSeverity::ERROR),
+        //         message: stri.to_string(),
+        //         ..Diagnostic::default()
+        //     });
+        // }
+    } else {
+        println!("No 'lib.nr' or 'main.nr' found in parent directories.");
+    }
+
+    driver.create_local_crate(file_path.clone(), CrateType::Binary);
 
     let file_diagnostics = match driver.check_crate(false) {
         Ok(warnings) => warnings,
