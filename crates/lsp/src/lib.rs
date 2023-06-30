@@ -265,6 +265,18 @@ fn on_did_save_text_document(
         let files = fm.as_simple_files();
 
         for FileDiagnostic { file_id, diagnostic } in file_diagnostics {
+            // TODO Hack hack hack
+            if fm.path(file_id).file_name() != actual_path.file_name()
+                && actual_path.file_name().unwrap().to_str() != Some("main.nr")
+                && actual_path.file_name().unwrap().to_str() != Some("lib.nr")
+            {
+                eprintln!(
+                    "Comparing: {} {}",
+                    fm.path(file_id).to_str().unwrap(),
+                    actual_path.to_str().unwrap()
+                );
+                continue; // HACK we list all errors, filter by hacky final path component
+            }
             // TODO(#1681): This file_id never be 0 because the "path" where it maps is the directory, not a file
             if file_id.as_usize() != 0 {
                 continue;

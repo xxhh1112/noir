@@ -115,6 +115,11 @@ impl Driver {
         LOCAL_CRATE
     }
 
+    // TODO hack
+    pub fn add_normal_file(&mut self, path_to_file: &Path) -> Option<FileId> {
+        self.context.file_manager.add_file(path_to_file, FileType::Normal)
+    }
+
     /// Creates a Non Local Crate. A Non Local Crate is any crate which is the not the crate that
     /// the compiler is compiling.
     pub fn create_non_local_crate<P: AsRef<Path>>(
