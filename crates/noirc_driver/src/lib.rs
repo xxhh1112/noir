@@ -179,6 +179,10 @@ impl Driver {
         let path_to_std_lib_file = PathBuf::from(std_crate_name).join("lib.nr");
         let std_crate = self.create_non_local_crate(path_to_std_lib_file, CrateType::Library);
         self.propagate_dep(std_crate, &CrateName::new(std_crate_name).unwrap());
+        let aztec_crate_name = "aztec3";
+        let path_to_std_lib_file = PathBuf::from(aztec_crate_name).join("lib.nr");
+        let aztec_crate = self.create_non_local_crate(path_to_std_lib_file, CrateType::Library);
+        self.propagate_dep(aztec_crate, &CrateName::new(aztec_crate_name).unwrap());
 
         let mut errors = vec![];
         CrateDefMap::collect_defs(LOCAL_CRATE, &mut self.context, &mut errors);
