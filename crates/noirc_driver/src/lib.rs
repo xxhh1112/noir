@@ -181,10 +181,6 @@ impl Driver {
         // TODO: This should actually be done when constructing the driver and then propagated to each dependency when added;
         // however, the `create_non_local_crate` panics if you add the stdlib as the first crate in the graph and other
         // parts of the code expect the `0` FileID to be the crate root. See also #1681
-        let std_crate_name = "std";
-        let path_to_std_lib_file = PathBuf::from(std_crate_name).join("lib.nr");
-        let std_crate = self.create_non_local_crate(path_to_std_lib_file, CrateType::Library);
-        self.propagate_dep(std_crate, &CrateName::new(std_crate_name).unwrap());
 
         let mut errors = vec![];
         CrateDefMap::collect_defs(LOCAL_CRATE, &mut self.context, &mut errors);

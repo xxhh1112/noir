@@ -279,6 +279,10 @@ fn on_did_save_text_document(
 
     driver.create_local_crate(file_path, CrateType::Binary);
 
+    let std_crate_name = "std";
+    let path_to_std_lib_file = PathBuf::from(std_crate_name).join("lib.nr");
+    let std_crate = driver.create_non_local_crate(path_to_std_lib_file, CrateType::Library);
+    driver.propagate_dep(std_crate, &CrateName::new(std_crate_name).unwrap());
     // TODO(AD): hacky dependency resolution
     if let Some(nargo_toml_path) = nargo_toml_path {
         let dependencies = read_dependencies(&nargo_toml_path);
@@ -288,7 +292,9 @@ fn on_did_save_text_document(
                     .parent()
                     .unwrap() // TODO
                     .join(PathBuf::from(&dependency_path).join("src").join("lib.nr"));
+                dbg!(&path_to_lib);
                 let library_crate = driver.create_non_local_crate(path_to_lib, CrateType::Library);
+                dbg!(&library_crate, &crate_name);
                 driver.propagate_dep(library_crate, &CrateName::new(crate_name).unwrap());
             }
         }
