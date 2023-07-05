@@ -287,7 +287,7 @@ fn on_did_save_text_document(
                 let path_to_lib = nargo_toml_path
                     .parent()
                     .unwrap() // TODO
-                    .join(PathBuf::from(&dependency_path).join("lib.nr"));
+                    .join(PathBuf::from(&dependency_path).join("src").join("lib.nr"));
                 let library_crate = driver.create_non_local_crate(path_to_lib, CrateType::Library);
                 driver.propagate_dep(library_crate, &CrateName::new(crate_name).unwrap());
             }
