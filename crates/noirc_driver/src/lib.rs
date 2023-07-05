@@ -185,7 +185,7 @@ impl Driver {
         let std_crate = self.create_non_local_crate(path_to_std_lib_file, CrateType::Library);
         self.propagate_dep(std_crate, &CrateName::new(std_crate_name).unwrap());
         let aztec_crate = self.create_non_local_crate(
-            "/Users/adomurad/sources/aztec3-packages/yarn-project/noir-contracts/src/contracts/noir-aztec3/src/lib.nr",
+            "/Users/adomurad/sources/aztec3-packages/yarn-project/noir-contracts/src/contracts/noir-aztec/src/lib.nr",
             CrateType::Library,
         );
         self.propagate_dep(aztec_crate, &CrateName::new("aztec3").unwrap());
