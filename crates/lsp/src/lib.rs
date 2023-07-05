@@ -1,4 +1,6 @@
 use std::{
+    collections::HashMap,
+    fs,
     future::Future,
     ops::{self, ControlFlow},
     path::{Path, PathBuf},
@@ -21,7 +23,7 @@ use lsp_types::{
 };
 use noirc_driver::Driver;
 use noirc_errors::{DiagnosticKind, FileDiagnostic};
-use noirc_frontend::graph::CrateType;
+use noirc_frontend::graph::{CrateName, CrateType};
 use serde_json::Value as JsonValue;
 use tower::Service;
 
@@ -237,6 +239,27 @@ fn find_nearest_parent_file(path: &Path, filenames: &[&str]) -> Option<PathBuf> 
     None
 }
 
+fn read_dependencies(
+    nargo_toml_path: &Path,
+) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    let content: String = fs::read_to_string(nargo_toml_path)?;
+    let value: toml::Value = toml::from_str(&content)?;
+
+    let mut dependencies = HashMap::new();
+
+    if let Some(toml::Value::Table(table)) = value.get("dependencies") {
+        for (key, value) in table {
+            if let toml::Value::Table(inner_table) = value {
+                if let Some(toml::Value::String(path)) = inner_table.get("path") {
+                    dependencies.insert(key.clone(), path.clone());
+                }
+            }
+        }
+    }
+
+    Ok(dependencies)
+}
+
 fn on_did_save_text_document(
     state: &mut LspState,
     params: DidSaveTextDocumentParams,
@@ -252,8 +275,24 @@ fn on_did_save_text_document(
     if let Some(new_path) = find_nearest_parent_file(&file_path, &["lib.nr", "main.nr"]) {
         file_path = new_path; // TODO unhack
     }
+    let nargo_toml_path = find_nearest_parent_file(&file_path, &["Nargo.toml"]);
 
     driver.create_local_crate(file_path, CrateType::Binary);
+
+    // TODO(AD): hacky dependency resolution
+    if let Some(nargo_toml_path) = nargo_toml_path {
+        let dependencies = read_dependencies(&nargo_toml_path);
+        if let Ok(dependencies) = dependencies {
+            for (crate_name, dependency_path) in dependencies.iter() {
+                let path_to_lib = nargo_toml_path
+                    .parent()
+                    .unwrap() // TODO
+                    .join(PathBuf::from(&dependency_path).join("lib.nr"));
+                let library_crate = driver.create_non_local_crate(path_to_lib, CrateType::Library);
+                driver.propagate_dep(library_crate, &CrateName::new(crate_name).unwrap());
+            }
+        }
+    }
 
     let file_diagnostics = match driver.check_crate(false) {
         Ok(warnings) => warnings,
@@ -265,22 +304,21 @@ fn on_did_save_text_document(
         let files = fm.as_simple_files();
 
         for FileDiagnostic { file_id, diagnostic } in file_diagnostics {
-            // TODO Hack hack hack
-            if fm.path(file_id).file_name() != actual_path.file_name()
-                && actual_path.file_name().unwrap().to_str() != Some("main.nr")
-                && actual_path.file_name().unwrap().to_str() != Some("lib.nr")
+            // TODO(AD): HACK, undo these total hacks once we have a proper approach
+            if file_id.as_usize() == 0 {
+                // main.nr case
+                if actual_path.file_name().unwrap().to_str() != Some("main.nr")
+                    && actual_path.file_name().unwrap().to_str() != Some("lib.nr")
+                {
+                    continue;
+                }
+            } else if fm.path(file_id).file_name().unwrap().to_str().unwrap()
+                != actual_path.file_name().unwrap().to_str().unwrap().replace(".nr", "")
             {
-                eprintln!(
-                    "Comparing: {} {}",
-                    fm.path(file_id).to_str().unwrap(),
-                    actual_path.to_str().unwrap()
-                );
-                continue; // HACK we list all errors, filter by hacky final path component
+                // every other file case
+                continue; // TODO(AD): HACK, we list all errors, filter by hacky final path component
             }
-            // TODO(#1681): This file_id never be 0 because the "path" where it maps is the directory, not a file
-            if file_id.as_usize() != 0 {
-                continue;
-            }
+            // // TODO(#
 
             let mut range = Range::default();
 
